@@ -1,11 +1,19 @@
 import numpy as np
-
+import pdb
 
 class SegReMapping:
     def __init__(self, mapping_name, min_ratio=0.01):
         self.label_mapping = np.load(mapping_name)
         self.min_ratio = min_ratio
         self.label_ipt = []
+        # (Pdb) self.label_mapping -- (150, 150)
+        # array([[ 32,  25,  97, ...,  86,  86,  80],
+        #        [ 97,  86,  82, ...,  97,  97,  97],
+        #        [ 86,  97, 136, ...,  21,  80,  43],
+        #        ...,
+        #        [111, 118,  62, ..., 149,  54,  54],
+        #        [118, 135, 118, ...,  54, 111, 118],
+        #        [  0,   1,   2, ..., 147, 148, 149]])
 
     def cross_remapping(self, cont_seg, styl_seg):
         cont_label_info = []

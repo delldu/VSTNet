@@ -1,9 +1,10 @@
 import torch
+import torch.nn as nn
 import numpy as np
 from PIL import Image
+import pdb
 
-
-class cWCT(torch.nn.Module):
+class cWCT(nn.Module):
     def __init__(self, eps=2e-5, use_double=False):
         super().__init__()
         self.eps = eps
@@ -27,6 +28,7 @@ class cWCT(torch.nn.Module):
 
         in_dtype = cont_feat.dtype
         if self.use_double:
+            pdb.set_trace()
             cont_feat = cont_feat.double()
             styl_feat = styl_feat.double()
 

@@ -6,7 +6,8 @@ from torchvision import transforms
 import torchvision.utils as utils
 from utils.utils import img_resize, load_segment
 import numpy as np
-
+import todos
+import pdb
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -39,14 +40,12 @@ if not os.path.exists(args.out_dir):
     os.makedirs(args.out_dir)
 out_dir = args.out_dir
 
-
-
 # Reversible Network
 from models.RevResNet import RevResNet
 if args.mode.lower() == "photorealistic":
-    RevNetwork = RevResNet(nBlocks=[10, 10, 10], nStrides=[1, 2, 2], nChannels=[16, 64, 256], in_channel=3, mult=4, hidden_dim=16, sp_steps=2)
+    RevNetwork = RevResNet(hidden_dim=16, sp_steps=2)
 elif args.mode.lower() == "artistic":
-    RevNetwork = RevResNet(nBlocks=[10, 10, 10], nStrides=[1, 2, 2], nChannels=[16, 64, 256], in_channel=3, mult=4, hidden_dim=64, sp_steps=1)
+    RevNetwork = RevResNet(hidden_dim=64, sp_steps=1)
 else:
     raise NotImplementedError()
 
@@ -66,9 +65,11 @@ style = Image.open(args.style).convert('RGB')
 
 ori_csize = content.size
 
+# args.max_size -- 1280
+# RevNetwork.down_scale === 4
 content = img_resize(content, args.max_size, down_scale=RevNetwork.down_scale)
 style = img_resize(style, args.max_size, down_scale=RevNetwork.down_scale)
-
+# content -- <class 'PIL.Image.Image'>
 
 # Segmentation
 if args.auto_seg:
@@ -77,28 +78,45 @@ if args.auto_seg:
     # An example of using SegFormer
     print("Building Segmentation Model SegFormer")
     from mmseg.apis import inference_segmentor, init_segmentor
-    config = 'models/segmentation/SegFormer/local_configs/segformer/B5/segformer.b5.640x640.ade.160k.py'
-    checkpoint = 'models/segmentation/SegFormer/segformer.b5.640x640.ade.160k.pth'
+    config = 'models/segmentation/SegFormer/local_configs/segformer/B4/segformer.b4.512x512.ade.160k.py'
+    checkpoint = 'models/segmentation/SegFormer/segformer.b4.512x512.ade.160k.pth'
     seg_model = init_segmentor(config, checkpoint, device=device)
+
+    # seg_model -- EncoderDecoder(...)
 
     # Inference
     content_BGR = np.array(content, dtype=np.uint8)[..., ::-1]
     content_seg = inference_segmentor(seg_model, content_BGR)[0]  # shape:[H, W], value from 0 to 149 indicating the class of pixel
+    # todos.debug.output_var("content_BGR", content_BGR)
+    # todos.debug.output_var("content_seg", content_seg)
+    # array [content_BGR] shape: (672, 1200, 3), min: 0, max: 255, mean: 84.571395
+    # array [content_seg] shape: (672, 1200), min: 2, max: 76, mean: 11.223916
+
     style_BGR = np.array(style, dtype=np.uint8)[..., ::-1]
     style_seg = inference_segmentor(seg_model, style_BGR)[0]
-    # -----------------------------
+    # todos.debug.output_var("style_BGR", style_BGR)
+    # todos.debug.output_var("style_seg", style_seg)
+    # array [style_BGR] shape: (720, 1280, 3), min: 0, max: 255, mean: 120.418425
+    # array [style_seg] shape: (720, 1280), min: 2, max: 21, mean: 10.591761
 
+    # -----------------------------
 
     # Post-processing segmentation results
     from models.segmentation.SegReMapping import SegReMapping
     label_remapping = SegReMapping(args.label_mapping, min_ratio=args.min_ratio)
+    # (Pdb) pp args.label_mapping, args.min_ratio
+    # ('models/segmentation/ade20k_semantic_rel.npy', 0.02)
+
     content_seg = label_remapping.self_remapping(content_seg)  # eliminate noisy class
     style_seg = label_remapping.self_remapping(style_seg)
     content_seg = label_remapping.cross_remapping(content_seg, style_seg)
-    # style_seg = label_remapping.styl_merge(content_seg, style_seg)
+    # todos.debug.output_var("content_seg", content_seg)
+    # array [content_seg] shape: (672, 1200), min: 2, max: 21, mean: 11.180663
 
     content_seg = np.asarray(content_seg).astype(np.uint8)
     style_seg = np.asarray(style_seg).astype(np.uint8)
+    # todos.debug.output_var("style_seg", style_seg)
+    # array [style_seg] shape: (720, 1280), min: 2, max: 21, mean: 10.575559
 
     # Save the class label of segmentation results
     if args.save_seg_label:
@@ -143,8 +161,20 @@ with torch.no_grad():
     z_c = RevNetwork(content, forward=True)
     z_s = RevNetwork(style, forward=True)
 
+    todos.debug.output_var("content", content)
+    todos.debug.output_var("style", style)
+
+    todos.debug.output_var("z_c", z_c)
+    todos.debug.output_var("z_s", z_s)
+
+    # tensor [content] size: [1, 3, 672, 1200], min: 0.0, max: 1.0, mean: 0.331653
+    # tensor [style] size: [1, 3, 720, 1280], min: 0.0, max: 1.0, mean: 0.472229
+    # tensor [z_c] size: [1, 32, 672, 1200], min: -1.065541, max: 1.080221, mean: -0.001157
+    # tensor [z_s] size: [1, 32, 720, 1280], min: -0.897597, max: 0.916365, mean: 0.000875
+
     # Transfer
     if args.alpha_c is not None and content_seg is None and style_seg is None:
+        pdb.set_trace()
         # interpolation between content and style, mask is not supported
         assert 0.0 <= args.alpha_c <= 1.0
         z_cs = cwct.interpolation(z_c, styl_feat_list=[z_s], alpha_s_list=[1.0], alpha_c=args.alpha_c)
@@ -153,6 +183,10 @@ with torch.no_grad():
 
     # Backward inference
     stylized = RevNetwork(z_cs, forward=False)
+    todos.debug.output_var("z_cs", z_cs)
+    todos.debug.output_var("stylized", stylized)
+    # tensor [z_cs] size: [1, 32, 672, 1200], min: -1.222188, max: 1.194442, mean: 0.000875
+    # tensor [stylized] size: [1, 3, 672, 1200], min: -0.307211, max: 1.29631, mean: 0.456198
 
 
 # save stylized
