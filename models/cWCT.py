@@ -5,6 +5,9 @@ from PIL import Image
 import pdb
 
 class cWCT(nn.Module):
+    '''
+    Cholesky decomposition based WCT    
+    '''
     def __init__(self, eps=2e-5, use_double=False):
         super().__init__()
         self.eps = eps

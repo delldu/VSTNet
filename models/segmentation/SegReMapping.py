@@ -1,3 +1,4 @@
+import torch
 import numpy as np
 import pdb
 
@@ -15,16 +16,16 @@ class SegReMapping:
         #        [118, 135, 118, ...,  54, 111, 118],
         #        [  0,   1,   2, ..., 147, 148, 149]])
 
-    def cross_remapping(self, cont_seg, styl_seg):
+    def cross_remapping(self, content_seg, style_seg):
         cont_label_info = []
         new_cont_label_info = []
-        for label in np.unique(cont_seg):
+        for label in np.unique(content_seg):
             cont_label_info.append(label)
             new_cont_label_info.append(label)
 
         style_label_info = []
         new_style_label_info = []
-        for label in np.unique(styl_seg):
+        for label in np.unique(style_seg):
             style_label_info.append(label)
             new_style_label_info.append(label)
 
@@ -39,37 +40,11 @@ class SegReMapping:
                 if new_label in style_label_info:
                     new_cont_label_info[cont_label_index] = new_label
                     break
-        new_cont_seg = cont_seg.copy()
+        new_content_seg = content_seg.copy()
         for i, current_label in enumerate(cont_label_info):
-            new_cont_seg[(cont_seg == current_label)] = new_cont_label_info[i]
-        return new_cont_seg
+            new_content_seg[(content_seg == current_label)] = new_cont_label_info[i]
+        return new_content_seg
 
-    def styl_merge(self, cont_seg, styl_seg):
-        cont_label_info = []
-        for label in np.unique(cont_seg):
-            cont_label_info.append(label)
-
-        style_label_info = []
-        new_style_label_info = []
-        for label in np.unique(styl_seg):
-            style_label_info.append(label)
-            new_style_label_info.append(label)
-
-        styl_set_diff = set(style_label_info) - set(cont_label_info)
-        valid_styl_set = set(style_label_info) - set(styl_set_diff)
-        styl_set_diff = set(styl_set_diff) - set(self.label_ipt)
-        for s in styl_set_diff:
-            style_label_index = style_label_info.index(s)
-            for j in range(self.label_mapping.shape[0]):
-                new_label = self.label_mapping[j, s]
-                if new_label in valid_styl_set:
-                    new_style_label_info[style_label_index] = new_label
-                    break
-        new_styl_seg = styl_seg.copy()
-        for i, current_label in enumerate(style_label_info):
-            # print("%d -> %d" %(current_label,new_style_label_info[i]))
-            new_styl_seg[(styl_seg == current_label)] = new_style_label_info[i]
-        return new_styl_seg
 
     def self_remapping(self, seg):
         init_ratio = self.min_ratio
@@ -98,4 +73,63 @@ class SegReMapping:
                                 break
         for i, current_label in enumerate(label_info):
             new_seg[(seg == current_label)] = new_label_info[i]
+        return new_seg
+
+class TorchSegReMapping:
+    def __init__(self, mapping_name, min_ratio=0.01):
+        self.label_mapping = torch.from_numpy(np.load(mapping_name))
+        self.min_ratio = min_ratio
+        # (Pdb) self.label_mapping -- (150, 150)
+        # tensor([[ 32,  25,  97, ...,  86,  86,  80],
+        #        [ 97,  86,  82, ...,  97,  97,  97],
+        #        [ 86,  97, 136, ...,  21,  80,  43],
+        #        ...,
+        #        [111, 118,  62, ..., 149,  54,  54],
+        #        [118, 135, 118, ...,  54, 111, 118],
+        #        [  0,   1,   2, ..., 147, 148, 149]])
+        # torch.int64
+
+    def cross_remapping(self, content_seg, style_seg):
+        unique_content_labels = torch.unique(content_seg)
+        unique_style_labels = torch.unique(style_seg)
+
+        new_content_seg = content_seg.clone()
+        new_unique_content_labels = unique_content_labels.clone()
+
+        for hole in new_unique_content_labels:
+            new_hole = self.find_new_label(hole, unique_style_labels)
+            new_unique_content_labels[unique_content_labels == hole] = new_hole
+
+        for i, label in enumerate(new_unique_content_labels):
+            new_content_seg[content_seg == label] = new_unique_content_labels[i]
+
+        return new_content_seg
+
+
+    def find_new_label(self, small_hole_label, big_holes):
+        candidate_sets = self.label_mapping[:, small_hole_label]
+        for label in candidate_sets:
+            if label in big_holes: # OK we find 
+                return label
+        return small_hole_label # Sorry we dont find
+
+
+    def self_remapping(self, seg):
+        # Assign label with small portions to label with large portion
+        h, w = seg.shape
+        min_n_pixels = max(int(h * w * self.min_ratio), 10)
+
+        new_seg = seg.clone()
+        unique_labels, unique_counts = torch.unique(seg, return_counts=True)
+        small_holes = unique_labels[unique_counts < min_n_pixels]
+        big_holes = unique_labels[unique_counts >= min_n_pixels]
+
+        new_unique_labels = unique_labels.clone()
+        for hole in small_holes:
+            new_hole = self.find_new_label(hole, big_holes)
+            new_unique_labels[unique_labels == hole] = new_hole
+
+        for i, label in enumerate(unique_labels):
+            new_seg[seg == label] = new_unique_labels[i]
+
         return new_seg

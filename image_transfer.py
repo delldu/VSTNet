@@ -102,20 +102,33 @@ if args.auto_seg:
     # -----------------------------
 
     # Post-processing segmentation results
-    from models.segmentation.SegReMapping import SegReMapping
+    from models.segmentation.SegReMapping import SegReMapping, TorchSegReMapping
+
     label_remapping = SegReMapping(args.label_mapping, min_ratio=args.min_ratio)
+    torch_label_remapping = TorchSegReMapping(args.label_mapping, min_ratio=args.min_ratio)
+
     # (Pdb) pp args.label_mapping, args.min_ratio
     # ('models/segmentation/ade20k_semantic_rel.npy', 0.02)
 
     content_seg = label_remapping.self_remapping(content_seg)  # eliminate noisy class
+    torch_content_seg = torch_label_remapping.self_remapping(torch.from_numpy(content_seg))
+
     style_seg = label_remapping.self_remapping(style_seg)
+    torch_style_seg = torch_label_remapping.self_remapping(torch.from_numpy(style_seg))
+
     content_seg = label_remapping.cross_remapping(content_seg, style_seg)
-    # todos.debug.output_var("content_seg", content_seg)
+    torch_content_seg = torch_label_remapping.cross_remapping(torch.from_numpy(content_seg), torch.from_numpy(style_seg))
+
+
+
+    content_seg = np.asarray(torch_content_seg).astype(np.uint8)
+    style_seg = np.asarray(torch_style_seg).astype(np.uint8)
+
+    todos.debug.output_var("content_seg", content_seg)
     # array [content_seg] shape: (672, 1200), min: 2, max: 21, mean: 11.180663
 
-    content_seg = np.asarray(content_seg).astype(np.uint8)
-    style_seg = np.asarray(style_seg).astype(np.uint8)
-    # todos.debug.output_var("style_seg", style_seg)
+
+    todos.debug.output_var("style_seg", style_seg)
     # array [style_seg] shape: (720, 1280), min: 2, max: 21, mean: 10.575559
 
     # Save the class label of segmentation results
