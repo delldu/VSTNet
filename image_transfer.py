@@ -182,6 +182,9 @@ with torch.no_grad():
 
     # tensor [content] size: [1, 3, 672, 1200], min: 0.0, max: 1.0, mean: 0.331653
     # tensor [style] size: [1, 3, 720, 1280], min: 0.0, max: 1.0, mean: 0.472229
+
+
+    
     # tensor [z_c] size: [1, 32, 672, 1200], min: -1.065541, max: 1.080221, mean: -0.001157
     # tensor [z_s] size: [1, 32, 720, 1280], min: -0.897597, max: 0.916365, mean: 0.000875
 

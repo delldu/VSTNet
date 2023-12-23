@@ -77,8 +77,8 @@ class SegReMapping:
 
 class TorchSegReMapping:
     def __init__(self, mapping_name, min_ratio=0.01):
-        self.label_mapping = torch.from_numpy(np.load(mapping_name))
         self.min_ratio = min_ratio
+        self.label_mapping = torch.from_numpy(np.load(mapping_name))
         # (Pdb) self.label_mapping -- (150, 150)
         # tensor([[ 32,  25,  97, ...,  86,  86,  80],
         #        [ 97,  86,  82, ...,  97,  97,  97],
@@ -90,6 +90,7 @@ class TorchSegReMapping:
         # torch.int64
 
     def cross_remapping(self, content_seg, style_seg):
+        # regard style has big holes, but content has small holes
         unique_content_labels = torch.unique(content_seg)
         unique_style_labels = torch.unique(style_seg)
 
@@ -97,7 +98,7 @@ class TorchSegReMapping:
         new_unique_content_labels = unique_content_labels.clone()
 
         for hole in new_unique_content_labels:
-            new_hole = self.find_new_label(hole, unique_style_labels)
+            new_hole = self.find_closest_hole(hole, unique_style_labels)
             new_unique_content_labels[unique_content_labels == hole] = new_hole
 
         for i, label in enumerate(new_unique_content_labels):
@@ -106,7 +107,7 @@ class TorchSegReMapping:
         return new_content_seg
 
 
-    def find_new_label(self, small_hole_label, big_holes):
+    def find_closest_hole(self, small_hole_label, big_holes):
         candidate_sets = self.label_mapping[:, small_hole_label]
         for label in candidate_sets:
             if label in big_holes: # OK we find 
@@ -115,7 +116,7 @@ class TorchSegReMapping:
 
 
     def self_remapping(self, seg):
-        # Assign label with small portions to label with large portion
+        # replace small hole with closest big hole
         h, w = seg.shape
         min_n_pixels = max(int(h * w * self.min_ratio), 10)
 
@@ -126,7 +127,7 @@ class TorchSegReMapping:
 
         new_unique_labels = unique_labels.clone()
         for hole in small_holes:
-            new_hole = self.find_new_label(hole, big_holes)
+            new_hole = self.find_closest_hole(hole, big_holes)
             new_unique_labels[unique_labels == hole] = new_hole
 
         for i, label in enumerate(unique_labels):

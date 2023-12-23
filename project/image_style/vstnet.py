@@ -1,7 +1,13 @@
+import os
 import torch
 import torch.nn as nn
 import numpy as np
 from torch.nn import functional as F
+from .segment import SegmentModel, SegmentLabel
+from .cwct import CWCT
+
+# from typing import Tuple
+import todos
 import pdb
 
 def split(x):
@@ -61,7 +67,9 @@ class InvConv2d(nn.Module):
 
     def inverse(self, y):
         y = y - self.bias
-        return F.conv2d(y, self.weight.squeeze().inverse().unsqueeze(2).unsqueeze(3))
+        return F.conv2d(
+            y, self.weight.squeeze().inverse().unsqueeze(2).unsqueeze(3)
+        )
 
 
 class residual_block(nn.Module):
@@ -163,6 +171,7 @@ class channel_reduction(nn.Module):
 
 
 class RevResNet(nn.Module):
+    '''Reversible Residual Network'''
     def __init__(self,
             nBlocks=[10, 10, 10],
             nStrides=[1, 2, 2], 
@@ -172,11 +181,13 @@ class RevResNet(nn.Module):
             hidden_dim=16, 
             sp_steps=2, 
             kernel=3,
+            model_path="models/image_photo_style.pth",
         ):
         super().__init__()
-        print(' == Building Reversible Residual Network %d Blocks== ' % (sum(nBlocks) * 3 + 1))
-        if not nChannels:
-            nChannels = [in_channel * 2, in_channel * 2 * 4, in_channel * 2 * 4 ** 2]
+        self.MAX_H = 1280
+        self.MAX_W = 1280
+        self.MAX_TIMES = 4
+        # GPU -- ?
 
         self.nBlocks = nBlocks
         self.pad = 2 * nChannels[0] - in_channel
@@ -187,6 +198,23 @@ class RevResNet(nn.Module):
         self.stack = self.block_stack(residual_block, nChannels, nBlocks, nStrides, mult=mult, kernel=kernel)
 
         self.channel_reduction = channel_reduction(nChannels[-1], hidden_dim, sp_steps=sp_steps, kernel=kernel)
+
+        self.load_weights(model_path=model_path)
+
+        self.segment_model = SegmentModel()
+        self.segment_label = SegmentLabel()
+        self.wct_model = CWCT()
+
+
+
+    def load_weights(self, model_path="models/image_photo_style.pth"):
+        cdir = os.path.dirname(__file__)
+        checkpoint = model_path if cdir == "" else cdir + "/" + model_path
+        sd = torch.load(checkpoint)
+        if 'state_dict' in sd.keys():
+            sd = sd['state_dict']
+        self.load_state_dict(sd)
+
 
     def block_stack(self, _block, nChannels, nBlocks, nStrides, mult, kernel=3):
         block_list = nn.ModuleList()
@@ -199,14 +227,49 @@ class RevResNet(nn.Module):
             block_list.append(_block(channel, stride, mult=mult, kernel=kernel))
         return block_list
 
-    def forward(self, x, forward=True):
-        if forward:
-            return self._forward(x)
-        else:
-            # pdb.set_trace()
-            return self._inverse(x)
+    def resize_pad_tensor(self, x):
+        # Need Resize ?
+        B, C, H, W = x.size()
+        s = min(min(self.MAX_H / H, self.MAX_W / W), 1.0)
+        SH, SW = int(s * H), int(s * W)
+        resize_x = F.interpolate(x.float(), size=(SH, SW), mode="bilinear", align_corners=False).to(x.dtype)
 
-    def _forward(self, x):
+        # Need Pad ?
+        r_pad = (self.MAX_TIMES - (SW % self.MAX_TIMES)) % self.MAX_TIMES
+        b_pad = (self.MAX_TIMES - (SH % self.MAX_TIMES)) % self.MAX_TIMES
+        resize_pad_x = F.pad(resize_x, (0, r_pad, 0, b_pad), mode="replicate")
+        return resize_pad_x
+
+
+    def forward(self, content, style):
+        B, C, H, W = content.size()
+
+        content = self.resize_pad_tensor(content)
+        style = self.resize_pad_tensor(style)
+
+        # todos.debug.output_var("content", content)
+        # todos.debug.output_var("style", style)
+
+        # Encode feature
+        content_feat = self.encode(content)
+        style_feat = self.encode(style)
+
+        # Segment and simple
+        content_seg = self.segment_model(content)
+        content_seg = self.segment_label(content_seg)
+        style_seg = self.segment_model(style)
+        style_reg = self.segment_label(style_seg)
+
+        # Refine content segment via style segment
+        content_seg = self.segment_label.cross_remapping(content_seg, style_seg)
+
+        z_cs = self.wct_model(content_feat, style_feat, content_seg, style_seg)
+
+        output = self.decode(z_cs)
+        return F.interpolate(output, size=(H, W), mode="bilinear", align_corners=False)
+
+
+    def encode(self, x):
         x = self.inj_pad.forward(x)
 
         x = split(x)
@@ -219,7 +282,7 @@ class RevResNet(nn.Module):
 
         return x
 
-    def _inverse(self, x):
+    def decode(self, x):
         x = self.channel_reduction.inverse(x)
 
         x = split(x)
@@ -231,34 +294,12 @@ class RevResNet(nn.Module):
 
         return x
 
-    def sample(self, transfer_module, x_c, x_s, device):
-        pdb.set_trace()
-        self.eval()
-        x_cs, x_c_cyc = [], []
-        for i in range(x_c.size(0)):
-            z_c = self(x_c[i].unsqueeze(0).to(device))
-            z_s = self(x_s[i].unsqueeze(0).to(device))
 
-            z_cs = transfer_module.transfer(z_c, z_s)
-            stylized = self(z_cs, forward=False)
-
-            z_cs = self(stylized)
-            z_csc = transfer_module.transfer(z_cs, z_c)
-            rec_csc = self(z_csc, forward=False)
-
-            x_cs.append(stylized.cpu())
-            x_c_cyc.append(rec_csc.cpu())
-
-        x_cs = torch.cat(x_cs)
-        x_c_cyc = torch.cat(x_c_cyc)
-
-        self.train()
-        return x_c, x_s, x_cs, x_c_cyc
+def create_photo_style_model():
+    model = RevResNet(hidden_dim=16, sp_steps=2, model_path="models/image_photo_style.pth")
+    return model
 
 
-if __name__ == '__main__':
-    model = RevResNet(nBlocks=[10, 10, 10], nStrides=[1, 2, 2], nChannels=[16, 64, 256], in_channel=3, mult=4, hidden_dim=16, sp_steps=2)
-
-    from torch.autograd import Variable
-    z = model(Variable(torch.randn(1, 3, 224, 224)))
-    print(z.shape)
+def create_artist_style_model():
+    model = RevResNet(hidden_dim=64, sp_steps=1, model_path="models/image_artist_style.pth")
+    return model

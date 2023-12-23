@@ -1,0 +1,9 @@
+6a09666c02d997e249ef05e162cce213  ade20k_rel.npy
+ed1b74faba7eeca64af1daca2b1aea4c  art_image.pth
+4ecdb3e67271659d75b3dfe14d18cc02  art_video.pth
+ed1b74faba7eeca64af1daca2b1aea4c  image_artist_style.pth
+45a710e4c3aeb45cf1d16572871b760a  image_photo_style.pth
+34f8d1ed63d6ae809b687e4e1421366b  image_segment.pth
+45a710e4c3aeb45cf1d16572871b760a  photo_image.pth
+dd710eeb2e00dc96f74b814b9c006684  photo_video.pth
+34f8d1ed63d6ae809b687e4e1421366b  segformer.b4.512x512.ade.160k.pth
