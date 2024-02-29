@@ -8,23 +8,23 @@ from .segment import SegmentModel, SegmentLabel
 from .cwct import CWCT
 from .color import rgb2lab, lab2rgb
 
-from typing import List
+from typing import Tuple
 
 import todos
 import pdb
 
-def vstnet_split(x) -> List[torch.Tensor]:
+def vstnet_split(x) -> Tuple[torch.Tensor, torch.Tensor]:
     n = x.size(1)//2
     x1 = x[:, :n, :, :].contiguous()
     x2 = x[:, n:, :, :].contiguous()
-    return x1, x2
+    return (x1, x2)
 
 
 def vstnet_merge(x1, x2):
     return torch.cat((x1, x2), dim=1)
 
 
-def vstnet_squeeze(x, size:int=2):
+def vstnet_pixel_shuffle(x, size:int=2):
     B, C, H, W = x.size()
     H = H // size
     W = W // size
@@ -32,7 +32,7 @@ def vstnet_squeeze(x, size:int=2):
     return x.reshape(B, C*size*size, H, W)
 
 
-def vstnet_unsqueeze(x, size:int =2):
+def vstnet_pixel_unshuffle(x, size:int =2):
     B, C, H, W = x.size()
     C = C // (size * size)
     x = x.reshape(B, size, size, C, H, W).permute(0, 3, 4, 1, 5, 2)
@@ -42,7 +42,7 @@ def vstnet_unsqueeze(x, size:int =2):
 class InjectivePad(nn.Module):
     def __init__(self, pad_size):
         super().__init__()
-        self.pad_size = pad_size
+        self.pad_size = pad_size # 0 or 29
         self.pad = nn.ZeroPad2d((0, 0, 0, pad_size))
 
     def forward(self, x):
@@ -55,91 +55,84 @@ class InjectivePad(nn.Module):
 
 
 class ResidualBlock1(nn.Module):
-    def __init__(self, channel, mult=4, kernel=3):
+    def __init__(self, channel):
         super().__init__()
         stride = 1
         in_ch = channel
 
         self.conv = nn.Sequential(
-            nn.ReflectionPad2d((kernel - 1) // 2),
-            nn.Conv2d(in_ch, channel//mult, kernel_size=kernel, stride=stride, padding=0, bias=True),
+            nn.ReflectionPad2d(1),
+            nn.Conv2d(in_ch, channel//4, kernel_size=3, stride=stride, padding=0, bias=True),
             nn.ReLU(),
-            nn.ReflectionPad2d((kernel - 1) // 2),
-            nn.Conv2d(channel // mult, channel // mult, kernel_size=kernel, padding=0, bias=True),
+            nn.ReflectionPad2d(1),
+            nn.Conv2d(channel // 4, channel // 4, kernel_size=3, padding=0, bias=True),
             nn.ReLU(),
-            nn.ReflectionPad2d((kernel - 1) // 2),
-            nn.Conv2d(channel // mult, channel, kernel_size=kernel, padding=0, bias=True)
+            nn.ReflectionPad2d(1),
+            nn.Conv2d(channel // 4, channel, kernel_size=3, padding=0, bias=True)
         )
 
-    def forward(self, x: List[torch.Tensor]) -> List[torch.Tensor]:
-        x1 = x[0]
-        x2 = x[1]
-        Fx2 = self.conv(x2)
-        return (x2, Fx2 + x1)
+    def forward(self, x1, x2) -> Tuple[torch.Tensor, torch.Tensor]:
+        fx = self.conv(x2)
+        return (x2, fx + x1)
 
-    def inverse(self, x: List[torch.Tensor]) -> List[torch.Tensor]:
-        x2, y1 = x[0], x[1]
-        Fx2 = - self.conv(x2)
-        x1 = Fx2 + y1
-        return (x1, x2)
+    def inverse(self, y1, y2) -> Tuple[torch.Tensor, torch.Tensor]:
+        fx = - self.conv(y1)
+        return (fx + y2, y1)
 
 class ResidualBlock2(nn.Module):
-    def __init__(self, channel, mult=4, kernel=3):
+    def __init__(self, channel):
         super().__init__()
         stride = 2
         in_ch = channel // 4
 
         self.conv = nn.Sequential(
-            nn.ReflectionPad2d((kernel - 1) // 2),
-            nn.Conv2d(in_ch, channel//mult, kernel_size=kernel, stride=stride, padding=0, bias=True),
+            nn.ReflectionPad2d(1),
+            nn.Conv2d(in_ch, channel//4, kernel_size=3, stride=stride, padding=0, bias=True),
             nn.ReLU(),
-            nn.ReflectionPad2d((kernel - 1) // 2),
-            nn.Conv2d(channel // mult, channel // mult, kernel_size=kernel, padding=0, bias=True),
+            nn.ReflectionPad2d(1),
+            nn.Conv2d(channel//4, channel//4, kernel_size=3, padding=0, bias=True),
             nn.ReLU(),
-            nn.ReflectionPad2d((kernel - 1) // 2),
-            nn.Conv2d(channel // mult, channel, kernel_size=kernel, padding=0, bias=True)
+            nn.ReflectionPad2d(1),
+            nn.Conv2d(channel//4, channel, kernel_size=3, padding=0, bias=True)
         )
 
-    def forward(self, x: List[torch.Tensor]) -> List[torch.Tensor]:
-        x1 = x[0]
-        x2 = x[1]
-        Fx2 = self.conv(x2)
-        x1 = vstnet_squeeze(x1) # [1, 16, 676, 1200] ==> [1, 64, 338, 600]
-        x2 = vstnet_squeeze(x2) # [1, 16, 676, 1200] ==> [1, 64, 338, 600]
-        return (x2, Fx2 + x1)
+    def forward(self, x1, x2) -> Tuple[torch.Tensor, torch.Tensor]:
+        fx = self.conv(x2)
+        x1 = vstnet_pixel_shuffle(x1) # [1, 16, 676, 1200] ==> [1, 64, 338, 600]
+        x2 = vstnet_pixel_shuffle(x2) # [1, 16, 676, 1200] ==> [1, 64, 338, 600]
+        return (x2, fx + x1)
 
-    def inverse(self, x: List[torch.Tensor]) -> List[torch.Tensor]:
-        x2, y1 = x[0], x[1]
-        x2 = vstnet_unsqueeze(x2)
-        Fx2 = - self.conv(x2)
-        x1 = Fx2 + y1
-        x1 = vstnet_unsqueeze(x1)
-        return (x1, x2)
+    def inverse(self, y1, y2) -> Tuple[torch.Tensor, torch.Tensor]:
+        y1 = vstnet_pixel_unshuffle(y1)
+        fx = - self.conv(y1)
+        x1 = fx + y2
+        x1 = vstnet_pixel_unshuffle(x1)
+        return (x1, y1)
 
 
 class ChannelReduction(nn.Module):
-    def __init__(self, in_ch, out_ch, sp_steps=2, n_blocks=2, kernel=3):
+    def __init__(self, in_ch=256, out_ch=16, sp_steps=2, n_blocks=2):
         super().__init__()
-        pad = out_ch * (4 ** sp_steps) - in_ch
+        pad = out_ch * (4 ** sp_steps) - in_ch # ==> pad === 0
         self.inj_pad = InjectivePad(pad)
         self.sp_steps = sp_steps
 
         self.block_list = nn.ModuleList()
         for i in range(n_blocks):
-            self.block_list.append(ResidualBlock1(out_ch * 4 ** sp_steps, mult=4, kernel=kernel))
+            self.block_list.append(ResidualBlock1(out_ch * 4 ** sp_steps))
 
     def forward(self, x):
-        x = list(vstnet_split(x))
-        x[0] = self.inj_pad.forward(x[0])
-        x[1] = self.inj_pad.forward(x[1])
+        x1, x2 = vstnet_split(x)
+        x1 = self.inj_pad.forward(x1)
+        x2 = self.inj_pad.forward(x2)
 
         # support torch.jit.script
         # for block in self.block_list:
         #     x = block.forward(x)
         for i, block in enumerate(self.block_list):
-            x = block(x)
+            (x1, x2) = block(x1, x2)
 
-        x = vstnet_merge(x[0], x[1])
+        x = vstnet_merge(x1, x2)
 
         # spread
         for _ in range(self.sp_steps):
@@ -158,7 +151,7 @@ class ChannelReduction(nn.Module):
             x = x.reshape(B, C, H, 2, W, 2).permute(0, 3, 5, 1, 2, 4)
             x = x.reshape(B, C * 4, H, W)
 
-        x = vstnet_split(x)
+        x1, x2 = vstnet_split(x)
         # support torch.jit.script
         # for block in self.block_list[::-1]:
         #     x = block.inverse(x)
@@ -166,46 +159,44 @@ class ChannelReduction(nn.Module):
         for i in range(n):
             for j, block in enumerate(self.block_list):
                 if j == n - i - 1:
-                    x = block(x)
-        x = list(x)
-        x[0] = self.inj_pad.inverse(x[0])
-        x[1] = self.inj_pad.inverse(x[1])
+                    x1, x2 = block(x1, x2)
+        # x = list(x)
+        x1 = self.inj_pad.inverse(x1)
+        x2 = self.inj_pad.inverse(x2)
 
-        x = vstnet_merge(x[0], x[1])
+        x = vstnet_merge(x1, x2)
         return x
 
 
 class RevResNet(nn.Module):
     '''Reversible Residual Network'''
-
     def __init__(self,
             nBlocks=[10, 10, 10],
             nStrides=[1, 2, 2], 
             nChannels=[16, 64, 256], 
             in_channel=3, 
-            mult=4, 
             hidden_dim=16, 
             sp_steps=2, 
-            kernel=3,
             model_path="models/image_photo_style.pth",
         ):
         super().__init__()
-        self.MAX_H = 1280
-        self.MAX_W = 1280
+        self.MAX_H = 1024
+        self.MAX_W = 1024
         self.MAX_TIMES = 4
-        # GPU -- ?
+        # GPU -- 5G, 800ms
 
-        pad = 2 * nChannels[0] - in_channel
+        pad = 2 * nChannels[0] - in_channel # 29
         self.inj_pad = InjectivePad(pad)
 
-        self.stack = self.block_stack(nChannels, nBlocks, nStrides, mult=mult, kernel=kernel)
-        self.channel_reduction = ChannelReduction(nChannels[-1], hidden_dim, sp_steps=sp_steps, kernel=kernel)
+        self.stack = self.block_stack(nChannels, nBlocks, nStrides)
+        self.channel_reduction = ChannelReduction(nChannels[-1], hidden_dim, sp_steps=sp_steps)
 
         self.load_weights(model_path=model_path)
 
         self.segment_model = SegmentModel()
         self.segment_label = SegmentLabel()
         self.cwct_model = CWCT()
+
 
 
     def load_weights(self, model_path="models/image_photo_style.pth"):
@@ -217,18 +208,19 @@ class RevResNet(nn.Module):
         self.load_state_dict(sd)
 
 
-    def block_stack(self, nChannels, nBlocks, nStrides, mult, kernel=3):
+    def block_stack(self, nChannels, nBlocks, nStrides):
         block_list = nn.ModuleList()
         strides = []
         channels = []
         for channel, depth, stride in zip(nChannels, nBlocks, nStrides):
             strides = strides + ([stride] + [1]*(depth-1))
             channels = channels + ([channel]*depth)
+
         for channel, stride in zip(channels, strides):
             if stride == 1:
-                block_list.append(ResidualBlock1(channel, mult=mult, kernel=kernel))
+                block_list.append(ResidualBlock1(channel))
             else:
-                block_list.append(ResidualBlock2(channel, mult=mult, kernel=kernel))
+                block_list.append(ResidualBlock2(channel))
 
         return block_list
 
@@ -282,11 +274,11 @@ class RevResNet(nn.Module):
         # tensor [x] size: [1, 3, 676, 1200], min: 0.0, max: 1.0, mean: 0.331319
         x = self.inj_pad.forward(x)
 
-        x = vstnet_split(x)
+        x1, x2 = vstnet_split(x)
         for block in self.stack:
-            x = block.forward(x)
+            x1, x2 = block.forward(x1, x2)
 
-        x = vstnet_merge(x[0], x[1])
+        x = vstnet_merge(x1, x2)
 
         x = self.channel_reduction.forward(x)
 
@@ -298,15 +290,15 @@ class RevResNet(nn.Module):
 
         x = self.channel_reduction.inverse(x)
 
-        x = vstnet_split(x)
+        x1, x2 = vstnet_split(x)
         # ugly code for torch.jit.script not support inverse !!!
         n = len(self.stack) # 30
         for i in range(n):
             #x = self.stack[-1-i].inverse(x)
             for j, block in enumerate(self.stack):
                 if j == n - i - 1:
-                    x = block.inverse(x)
-        x = vstnet_merge(x[0], x[1])
+                    x1, x2 = block.inverse(x1, x2)
+        x = vstnet_merge(x1, x2)
 
         x = self.inj_pad.inverse(x)
 

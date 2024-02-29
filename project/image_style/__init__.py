@@ -22,6 +22,18 @@ import todos
 import pdb
 
 
+def get_trace_model():
+    """Create model."""
+
+    model = create_photo_style_model()
+
+    device = todos.model.get_device()
+    model = model.to(device)
+    model.eval()
+
+    print(f"Running on {device} ...")
+    return model, device
+
 def get_photo_style_model():
     """Create model."""
 

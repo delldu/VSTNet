@@ -63,10 +63,10 @@ def run_bench_mark():
     ) as p:
         for ii in range(N):
             image = torch.randn(B, C, H, W)
-            style = torch.randn(B, C, H, W)
+            input2 = torch.randn(B, C, H, W)
 
             with torch.no_grad():
-                y = model(image.to(device), style.to(device))
+                y = model(image.to(device), input2.to(device))
             if 'cpu' not in str(device):
                 torch.cuda.synchronize()
         p.step()
@@ -80,33 +80,33 @@ def export_onnx_model():
 
     import onnx
     import onnxruntime
-    # from onnxsim import simplify
+    from onnxsim import simplify
     import onnxoptimizer
 
     print("Export onnx model ...")
 
     # 1. Run torch model
-    model, device = image_style.get_photo_style_model()
+    model, device = image_style.get_trace_model() # get_photo_style_model()
 
-    B, C, H, W = 1, 3, model.MAX_H, model.MAX_W
-    content_input = torch.randn(B, C, 512, 512).to(device)
-    style_input = torch.randn(B, C, 256, 256).to(device)
+    B, C, H, W = 1, 3, 256, 256 #model.MAX_H, model.MAX_W
+    dummy_input1 = torch.randn(B, C, H, W).to(device)
+    dummy_input2 = torch.randn(B, C, H, W).to(device)
     with torch.no_grad():
-        dummy_output = model(content_input, style_input)
+        dummy_output = model(dummy_input1, dummy_input2)
     torch_outputs = [dummy_output.cpu()]
 
     # 2. Export onnx model
-    input_names = [ "content", "style"]
+    input_names = [ "input1", "input2" ]
     output_names = [ "output" ]
     dynamic_axes = { 
-        'content' : {2: 'height', 3: 'width'}, 
-        'style' : {2: 'height', 3: 'width'}, 
+        'input1' : {2: 'height', 3: 'width'}, 
+        'input2' : {2: 'height', 3: 'width'}, 
         'output' : {2: 'height', 3: 'width'} 
     } 
     onnx_filename = "output/image_photo_style.onnx"
 
-    torch.onnx.export(model, (content_input, style_input), onnx_filename, 
-        verbose=True, 
+    torch.onnx.export(model, (dummy_input1, dummy_input2), onnx_filename, 
+        verbose=False, 
         input_names=input_names, 
         output_names=output_names,
         # dynamic_axes=dynamic_axes,
@@ -132,7 +132,7 @@ def export_onnx_model():
     def to_numpy(tensor):
         return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
 
-    onnx_inputs = {input_names[0]: to_numpy(content_input), input_names[1]: to_numpy(style_input) }
+    onnx_inputs = {input_names[0]: to_numpy(dummy_input1), input_names[1]: to_numpy(dummy_input2)}
     onnx_outputs = ort_session.run(None, onnx_inputs)
 
     # 5.Compare output results
