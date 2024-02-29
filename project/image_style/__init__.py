@@ -22,10 +22,24 @@ import todos
 import pdb
 
 
-def get_trace_model():
+def get_vstnet_encoder_model():
     """Create model."""
+    from .vstnet import VSTEncoder
 
-    model = create_photo_style_model()
+    model = VSTEncoder()
+
+    device = todos.model.get_device()
+    model = model.to(device)
+    model.eval()
+
+    print(f"Running on {device} ...")
+    return model, device
+
+def get_vstnet_decoder_model():
+    """Create model."""
+    from .vstnet import VSTDecoder
+
+    model = VSTDecoder()
 
     device = todos.model.get_device()
     model = model.to(device)
@@ -44,17 +58,17 @@ def get_photo_style_model():
     model.eval()
 
     print(f"Running on {device} ...")
-    # make sure model good for C/C++
-    model = torch.jit.script(model)
-    # https://github.com/pytorch/pytorch/issues/52286
-    torch._C._jit_set_profiling_executor(False)
-    # C++ Reference
-    # torch::jit::getProfilingMode() = false;                                                                                                             
-    # torch::jit::setTensorExprFuserEnabled(false);
+    # # make sure model good for C/C++
+    # model = torch.jit.script(model)
+    # # https://github.com/pytorch/pytorch/issues/52286
+    # torch._C._jit_set_profiling_executor(False)
+    # # C++ Reference
+    # # torch::jit::getProfilingMode() = false;                                                                                                             
+    # # torch::jit::setTensorExprFuserEnabled(false);
 
-    todos.data.mkdir("output")
-    if not os.path.exists("output/image_photo_style.torch"):
-        model.save("output/image_photo_style.torch")
+    # todos.data.mkdir("output")
+    # if not os.path.exists("output/image_photo_style.torch"):
+    #     model.save("output/image_photo_style.torch")
 
     return model, device
 
