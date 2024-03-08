@@ -3,7 +3,8 @@ import os
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from .segment import SegmentModel, SegmentLabel
+from .segment import SegmentModel
+#, SegmentLabel
 from .cwct import CWCT
 from .color import rgb2lab, lab2rgb
 
@@ -182,7 +183,7 @@ class VSTNetModel(nn.Module):
         self.decoder = VSTDecoder(hidden_dim=hidden_dim, sp_steps=sp_steps, model_path=model_path)
 
         self.segment_model = SegmentModel()
-        self.segment_label = SegmentLabel()
+        # self.segment_label = SegmentLabel()
         self.cwct_model = CWCT()
 
 
@@ -200,33 +201,43 @@ class VSTNetModel(nn.Module):
         return resize_pad_x
 
 
-    def forward(self, content, style):
-        B, C, H, W = content.size()
-        content_lab = rgb2lab(content)
+    def forward(self, c_image, s_image):
+        B, C, H, W = c_image.size()
+        content_lab = rgb2lab(c_image) # size() -- [1, 3, 675, 1200]
+        # tensor [c_image] size: [1, 3, 675, 1200], min: 0.0, max: 1.0, mean: 0.331631
 
-        content = self.resize_pad_tensor(content)
-        style = self.resize_pad_tensor(style)
+        s_image = self.resize_pad_tensor(s_image)
+        c_image = self.resize_pad_tensor(c_image) # size() -- [1, 3, 576, 1024]
 
         # Encode features
-        z_c = self.encoder.forward(content) # self.encode(content)
-        z_s = self.encoder.forward(style)   # self.encode(style)
+        print("==========================================")
+        todos.debug.output_var("s_image", s_image)
+        s_feat = self.encoder.forward(s_image)   # self.encode(s_image)
+        todos.debug.output_var("s_image encode", s_feat)
+
+        todos.debug.output_var("c_image", c_image)
+        c_feat = self.encoder.forward(c_image) # size() -- [1, 32, 576, 1024]
+        todos.debug.output_var("c_image encode", c_feat)
+        print("==========================================")
 
         # Segment and simple
-        content_seg = self.segment_model(content)
-        content_seg = self.segment_label(content_seg) # remove small holes
-        style_seg = self.segment_model(style)
-        style_reg = self.segment_label(style_seg) # remove small holes
+        c_mask = self.segment_model(c_image).to(torch.int64) # size() -- [1, 1, 576, 1024]
+        c_mask = self.segment_model.remove_small_holes(c_mask) # remove small holes
+        s_mask = self.segment_model(s_image).to(torch.int64)
+        s_mask = self.segment_model.remove_small_holes(s_mask) # remove small holes
 
-        # Refine content segment via style segment guide
-        content_seg = self.segment_label.cross_remapping(content_seg, style_seg)
+        z_cs = self.cwct_model(c_feat, s_feat, c_mask, s_mask) # size() -- [1, 32, 576, 1024]
+        todos.debug.output_var("z_cs", z_cs)
 
-        z_cs = self.cwct_model(z_c, z_s, content_seg, style_seg)
-
-        output = self.decoder.forward(z_cs)    # self.decode(z_cs)
+        output = self.decoder.forward(z_cs)    # size() -- [1, 3, 576, 1024]
         output = F.interpolate(output, size=(H, W), mode="bilinear", align_corners=False)
+        todos.debug.output_var("output", output)
 
         output_lab = rgb2lab(output)
-        blend_lab = torch.cat((content_lab[:, 0:1, :, :], output_lab[:, 1:3, :, :]), dim=1)
+        # blend_ab = 0.1*content_lab[:, 1:3, :, :] + 0.9*output_lab[:, 1:3, :, :]
+        blend_ab = output_lab[:, 1:3, :, :]
+
+        blend_lab = torch.cat((content_lab[:, 0:1, :, :], blend_ab), dim=1)
         output = lab2rgb(blend_lab)
 
         return output
@@ -271,6 +282,7 @@ class VSTAE(nn.Module):
         if 'state_dict' in sd.keys():
             sd = sd['state_dict']
         self.load_state_dict(sd)
+        print(f"Loading {model_path} OK.")
 
     def forward(self, x):
         # useless, just place holder function

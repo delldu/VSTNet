@@ -149,7 +149,6 @@ class VisionTransformer(nn.Module):
         # embed_dims = [64, 128, 320, 512]
         # num_heads = [1, 2, 5, 8]
         # mlp_ratios = [4, 4, 4, 4]
-        # drop_path_rate = 0.1
         # norm_layer = functools.partial(<class 'torch.nn.modules.normalization.LayerNorm'>, eps=1e-06)
         # depths = [3, 4, 6, 3]
         # sr_ratios = [8, 4, 2, 1]
@@ -279,7 +278,7 @@ class DWConv(nn.Module):
 #         super().__init__(
 #             patch_size=4, embed_dims=[32, 64, 160, 256], num_heads=[1, 2, 5, 8], mlp_ratios=[4, 4, 4, 4],
 #             norm_layer=partial(nn.LayerNorm, eps=1e-6), depths=[2, 2, 2, 2], sr_ratios=[8, 4, 2, 1],
-#             drop_path_rate=0.1,embedding_dim = 256)
+#             embedding_dim = 256)
 
 
 # class mit_b1(VisionTransformer):
@@ -292,7 +291,6 @@ class DWConv(nn.Module):
 #             norm_layer=partial(nn.LayerNorm, eps=1e-6),
 #             depths=[2, 2, 2, 2],
 #             sr_ratios=[8, 4, 2, 1],
-#             drop_path_rate=0.1,
 #             embedding_dim=256,
 #         )
 
@@ -307,7 +305,6 @@ class DWConv(nn.Module):
 #             norm_layer=partial(nn.LayerNorm, eps=1e-6),
 #             depths=[3, 4, 6, 3],
 #             sr_ratios=[8, 4, 2, 1],
-#             drop_path_rate=0.1,
 #         )
 
 
@@ -316,7 +313,7 @@ class DWConv(nn.Module):
 #         super().__init__(
 #             patch_size=4, embed_dims=[64, 128, 320, 512], num_heads=[1, 2, 5, 8], mlp_ratios=[4, 4, 4, 4],
 #             norm_layer=partial(nn.LayerNorm, eps=1e-6), depths=[3, 4, 18, 3], sr_ratios=[8, 4, 2, 1],
-#             drop_path_rate=0.1)
+#         )
 
 
 class mit_b4(VisionTransformer):
@@ -332,7 +329,6 @@ class mit_b4(VisionTransformer):
 #         super().__init__(
 #             patch_size=4, embed_dims=[64, 128, 320, 512], num_heads=[1, 2, 5, 8], mlp_ratios=[4, 4, 4, 4],
 #             norm_layer=partial(nn.LayerNorm, eps=1e-6), depths=[3, 6, 40, 3], sr_ratios=[8, 4, 2, 1],
-#             drop_path_rate=0.1
 #         )
 
 
@@ -458,7 +454,7 @@ class SegFormerHead(nn.Module):
 class SegmentModel(nn.Module):
     """Encoder Decoder segmentors."""
 
-    def __init__(self):
+    def __init__(self, min_ratio=0.01):
         super().__init__()
         self.MAX_H = 1024
         self.MAX_W = 1024
@@ -470,8 +466,16 @@ class SegmentModel(nn.Module):
         self.num_classes = self.decode_head.num_classes
 
         self.load_weights()
-        self.eval()
 
+        self.min_ratio = min_ratio
+        mapping_name = "models/ade20k_semantic_rel.npy"
+        cdir = os.path.dirname(__file__)
+        mapping_name = mapping_name if cdir == "" else cdir + "/" + mapping_name
+        label_mapping = torch.from_numpy(np.load(mapping_name)).to(torch.int64)
+        self.register_buffer("label_mapping", label_mapping)
+
+
+        self.eval()
 
     def load_weights(self, model_path="models/image_segment.pth"):
         cdir = os.path.dirname(__file__)
@@ -507,76 +511,39 @@ class SegmentModel(nn.Module):
         # mask.dtype -- int64, size() -- [1, 1, 960, 1280]
 
         mask = mask[:, :, 0:H, 0:W]
+        mask = mask.clamp(0, self.num_classes).to(torch.float32)
+        # ADE20K class number is 150, to float32 is for onnx export
 
-        return mask.clamp(0, self.num_classes) # ADE20K class number is 150
-
-
-class SegmentLabel(nn.Module):
-    '''Segment Semantic Label Remapping'''
-    def __init__(self, min_ratio=0.02):
-        super().__init__()
-        self.min_ratio = min_ratio
-
-        mapping_name = "models/ade20k_semantic_rel.npy"
-        cdir = os.path.dirname(__file__)
-        mapping_name = mapping_name if cdir == "" else cdir + "/" + mapping_name
-        label_mapping = torch.from_numpy(np.load(mapping_name)).to(torch.int64)
-        self.register_buffer("label_mapping", label_mapping)
-
-        # (Pdb) self.label_mapping -- (150, 150)
-        # tensor([[ 32,  25,  97, ...,  86,  86,  80],
-        #        [ 97,  86,  82, ...,  97,  97,  97],
-        #        [ 86,  97, 136, ...,  21,  80,  43],
-        #        ...,
-        #        [111, 118,  62, ..., 149,  54,  54],
-        #        [118, 135, 118, ...,  54, 111, 118],
-        #        [  0,   1,   2, ..., 147, 148, 149]])
-        # torch.int64
-
-    def forward(self, segment):
-        return self.self_remapping(segment)
+        return mask
 
     def find_closest_label(self, label, guide_labels):
         candidate_sets = self.label_mapping[:, int(label)]
-        for label in candidate_sets:
-            index = torch.where(guide_labels==label)[0]
-            if index.size(0) > 0: # OK we find 
-                return label
+
+        for close_label in candidate_sets:
+            index = torch.where(guide_labels==close_label)[0]
+            if index.size(0) > 0: # OK we find
+                return close_label
+
         return label # Sorry we don't find, use original
         
-    def cross_remapping(self, segment, guide_segment):
-        # Example: style segment guide content segment
-        unique_content_labels = torch.unique(segment)
-        unique_guide_labels = torch.unique(guide_segment)
 
-        new_segment = segment.clone()
-        new_unique_content_labels = unique_content_labels.clone()
+    def remove_small_holes(self, segment):
+        # segment.size() -- [1, 1, 576, 1024], segment.dtype -- torch.int64
 
-        for hole in new_unique_content_labels:
-            new_hole = self.find_closest_label(hole, unique_guide_labels)
-            new_unique_content_labels[unique_content_labels == hole] = new_hole
-
-        for i, label in enumerate(new_unique_content_labels):
-            new_segment[segment == label] = new_unique_content_labels[i]
-
-        return new_segment
-
-    def self_remapping(self, segment):
         # Replace small hole with closest big one
         B, C, H, W = segment.size()
         min_pixels = max(int(H * W * self.min_ratio), 10)
 
-        new_segment = segment.clone()
+        new_c_mask = segment.clone()
         unique_labels, unique_counts = torch.unique(segment, return_counts=True)
         small_holes = unique_labels[unique_counts < min_pixels]
         guide_labels = unique_labels[unique_counts >= min_pixels]
 
-        new_unique_labels = unique_labels.clone()
+        print("-----------------------------------------")
         for hole in small_holes:
             new_hole = self.find_closest_label(hole, guide_labels)
-            new_unique_labels[unique_labels == hole] = new_hole
+            print(f"Segment self {hole} ==> {new_hole} ...");
+            new_c_mask[segment == hole] = new_hole
 
-        for i, label in enumerate(unique_labels):
-            new_segment[segment == label] = new_unique_labels[i]
-
-        return new_segment
+        print("-----------------------------------------")
+        return new_c_mask

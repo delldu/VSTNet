@@ -1,6 +1,8 @@
 import image_style
 
 image_style.image_photo_predict("images/demo/content/05*.jpg", "images/demo/style/05.jpg", "output/demo")
+# image_style.image_photo_predict("images/demo/style/05*.jpg", "images/demo/content/05.jpg", "output/demo")
+
 # image_style.image_photo_predict("images/aurora/*.jpeg", "images/demo/style/05.jpg", "output/aurora")
 # image_style.image_photo_predict("images/building/*.jpeg", "images/demo/style/05.jpg", "output/building")
 # image_style.image_photo_predict("images/long/*.jpeg", "images/demo/style/05.jpg", "output/long")

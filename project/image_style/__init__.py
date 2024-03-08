@@ -33,6 +33,8 @@ def get_vstnet_encoder_model():
     model.eval()
 
     print(f"Running on {device} ...")
+    model = torch.jit.script(model)
+
     return model, device
 
 def get_vstnet_decoder_model():
@@ -46,7 +48,26 @@ def get_vstnet_decoder_model():
     model.eval()
 
     print(f"Running on {device} ...")
+    model = torch.jit.script(model)
+
     return model, device
+
+
+def get_segment_model():
+    """Create model."""
+    from .segment import SegmentModel
+
+    model = SegmentModel()
+
+    device = todos.model.get_device()
+    model = model.to(device)
+    model.eval()
+
+    print(f"Running on {device} ...")
+    # model = torch.jit.script(model)
+
+    return model, device
+
 
 def get_photo_style_model():
     """Create model."""

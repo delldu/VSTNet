@@ -13,6 +13,7 @@ import os
 import torch
 import image_style
 import argparse
+import todos
 import pdb
 
 def test_input_shape():
@@ -88,7 +89,7 @@ def export_vst_encoder_onnx_model():
     # 1. Run torch model
     model, device = image_style.get_vstnet_encoder_model() 
 
-    B, C, H, W = 1, 3, 256, 256
+    B, C, H, W = 1, 3, 512, 512
     dummy_input = torch.randn(B, C, H, W).to(device)
     with torch.no_grad():
         dummy_output = model(dummy_input)
@@ -105,6 +106,7 @@ def export_vst_encoder_onnx_model():
     } 
     onnx_filename = "output/vstnet_encoder.onnx"
 
+    print(f"Export {onnx_filename} ..........................................")
     torch.onnx.export(model, (dummy_input), onnx_filename, 
         verbose=False, 
         input_names=input_names, 
@@ -139,6 +141,8 @@ def export_vst_encoder_onnx_model():
     assert len(torch_outputs) == len(onnx_outputs)
     for torch_output, onnx_output in zip(torch_outputs, onnx_outputs):
         torch.testing.assert_close(torch_output, torch.tensor(onnx_output), rtol=0.01, atol=0.01)
+
+    todos.model.reset_device()
 
     print("!!!!!! Torch and ONNX Runtime output matched !!!!!!")
 
@@ -155,7 +159,7 @@ def export_vst_decoder_onnx_model():
     # 1. Run torch model
     model, device = image_style.get_vstnet_decoder_model() 
 
-    B, C, H, W = 1, 32, 256, 256
+    B, C, H, W = 1, 32, 512, 512
     dummy_input = torch.randn(B, C, H, W).to(device)
     with torch.no_grad():
         dummy_output = model(dummy_input)
@@ -172,6 +176,7 @@ def export_vst_decoder_onnx_model():
     } 
     onnx_filename = "output/vstnet_decoder.onnx"
 
+    print(f"Export {onnx_filename} ..........................................")
     torch.onnx.export(model, (dummy_input), onnx_filename, 
         verbose=False, 
         input_names=input_names, 
@@ -206,6 +211,71 @@ def export_vst_decoder_onnx_model():
     assert len(torch_outputs) == len(onnx_outputs)
     for torch_output, onnx_output in zip(torch_outputs, onnx_outputs):
         torch.testing.assert_close(torch_output, torch.tensor(onnx_output), rtol=0.01, atol=0.01)
+    todos.model.reset_device()
+
+    print("!!!!!! Torch and ONNX Runtime output matched !!!!!!")
+
+def export_segment_onnx_model():
+    import onnx
+    import onnxruntime
+    from onnxsim import simplify
+    import onnxoptimizer
+
+    print("Export onnx model ...")
+
+    # 1. Run torch model
+    model, device = image_style.get_segment_model()
+
+    B, C, H, W = 1, 3, 256, 256 # model.MAX_H, model.MAX_W
+    dummy_input = torch.randn(B, C, H, W).to(device)
+    with torch.no_grad():
+        dummy_output = model(dummy_input)
+    torch_outputs = [dummy_output.cpu()]
+
+    # 2. Export onnx model
+    input_names = [ "input" ]
+    output_names = [ "output" ]
+    dynamic_axes = { 
+        'input' : {2: 'height', 3: 'width'}, 
+        'output' : {2: 'height', 3: 'width'} 
+    }    
+    onnx_filename = "output/image_segment.onnx"
+
+    torch.onnx.export(model, dummy_input, onnx_filename, 
+        verbose=False, 
+        input_names=input_names, 
+        output_names=output_names,
+        dynamic_axes=dynamic_axes,
+    )
+
+    # 3. Check onnx model file
+    onnx_model = onnx.load(onnx_filename)
+    onnx.checker.check_model(onnx_model)
+
+    onnx_model, check = simplify(onnx_model)
+    assert check, "Simplified ONNX model could not be validated"
+    onnx_model = onnxoptimizer.optimize(onnx_model)    
+    onnx.save(onnx_model, onnx_filename)
+    # print(onnx.helper.printable_graph(onnx_model.graph))
+
+    # 4. Run onnx model
+    if 'cuda' in device.type:
+        ort_session = onnxruntime.InferenceSession(onnx_filename, providers=['CUDAExecutionProvider'])
+    else:        
+        ort_session = onnxruntime.InferenceSession(onnx_filename, providers=['CPUExecutionProvider'])
+
+    def to_numpy(tensor):
+        return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
+
+    onnx_inputs = {input_names[0]: to_numpy(dummy_input) }
+    onnx_outputs = ort_session.run(None, onnx_inputs)
+
+    # 5.Compare output results
+    assert len(torch_outputs) == len(onnx_outputs)
+    for torch_output, onnx_output in zip(torch_outputs, onnx_outputs):
+        torch.testing.assert_close(torch_output, torch.tensor(onnx_output), rtol=0.01, atol=0.01)
+
+    todos.model.reset_device()
 
     print("!!!!!! Torch and ONNX Runtime output matched !!!!!!")
 
@@ -247,6 +317,7 @@ if __name__ == "__main__":
     if args.export_onnx:
         export_vst_encoder_onnx_model()
         export_vst_decoder_onnx_model()
+        export_segment_onnx_model() # OK for trace mode
 
     if args.compile:
         compile_model()
