@@ -289,8 +289,8 @@ def debug_onnx_model():
 
     input_names = [ "input" ]
 
-    encoder_onnx_filename = "output/vstnet_encoder.onnx"
-    decoder_onnx_filename = "output/vstnet_decoder.onnx"
+    encoder_onnx_filename = "output/image_photo_encoder.onnx"
+    decoder_onnx_filename = "output/image_photo_decoder.onnx"
 
     device = todos.model.get_device()
 
@@ -321,21 +321,7 @@ def debug_onnx_model():
     todos.debug.output_var("encoder_output_tensor", encoder_onnx_outputs[0])
     todos.debug.output_var("decoder_output_tensor", decoder_output_tensor)
 
-    # todos.debug.output_tensor(decoder_output_tensor)
     todos.data.save_tensor([decoder_output_tensor], "/tmp/test.png")
-    # ==========================================
-    # Info: c_image Tensor: 1x3x576x1024
-    # min: 0.0000, max: 1.0000, mean: 0.3286
-
-    # Info: c_image encode:  Tensor: 1x32x576x1024
-    # min: -0.9765, max: 1.0000, mean: -0.0013
-    # Info: output_tensor Tensor: 1x3x576x1024
-    # min: -0.2949, max: 1.0000, mean: 0.3884
-
-    # array [encoder_output_tensor] shape: (1, 32, 576, 1024), 
-    # min: -0.9764760136604309, max: 1.0, mean: -0.001306000049225986
-    # tensor [decoder_output_tensor] size: [1, 3, 576, 1024], 
-    # min: -0.294885, max: 1.0, mean: 0.388356
 
 
 if __name__ == "__main__":
@@ -353,7 +339,7 @@ if __name__ == "__main__":
     if args.export_onnx:
         export_vst_encoder_onnx_model()
         export_vst_decoder_onnx_model()
-        # export_segment_onnx_model() # OK for trace mode
+        export_segment_onnx_model() # OK for trace mode
 
     if args.debug:
         debug_onnx_model()

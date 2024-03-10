@@ -18,7 +18,6 @@ import torch.nn.functional as F
 from .vstnet import create_photo_style_model, create_artist_style_model
 
 import todos
-
 import pdb
 
 
@@ -116,8 +115,6 @@ def image_photo_predict(input_files, style_file, output_dir):
 
         with torch.no_grad():
             predict_tensor = model(content_tensor.to(device), style_tensor.to(device))
-
-        todos.debug.output_var("predict_tensor", predict_tensor)
 
         output_file = f"{output_dir}/{os.path.basename(filename)}"
 
