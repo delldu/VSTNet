@@ -79,17 +79,17 @@ def get_photo_style_model():
     model.eval()
 
     print(f"Running on {device} ...")
-    # # make sure model good for C/C++
-    # model = torch.jit.script(model)
-    # # https://github.com/pytorch/pytorch/issues/52286
-    # torch._C._jit_set_profiling_executor(False)
-    # # C++ Reference
-    # # torch::jit::getProfilingMode() = false;                                                                                                             
-    # # torch::jit::setTensorExprFuserEnabled(false);
+    # make sure model good for C/C++
+    model = torch.jit.script(model)
+    # https://github.com/pytorch/pytorch/issues/52286
+    torch._C._jit_set_profiling_executor(False)
+    # C++ Reference
+    # torch::jit::getProfilingMode() = false;                                                                                                             
+    # torch::jit::setTensorExprFuserEnabled(false);
 
-    # todos.data.mkdir("output")
-    # if not os.path.exists("output/image_photo_style.torch"):
-    #     model.save("output/image_photo_style.torch")
+    todos.data.mkdir("output")
+    if not os.path.exists("output/image_photo_style.torch"):
+        model.save("output/image_photo_style.torch")
 
     return model, device
 
@@ -116,6 +116,8 @@ def image_photo_predict(input_files, style_file, output_dir):
 
         with torch.no_grad():
             predict_tensor = model(content_tensor.to(device), style_tensor.to(device))
+
+        todos.debug.output_var("predict_tensor", predict_tensor)
 
         output_file = f"{output_dir}/{os.path.basename(filename)}"
 

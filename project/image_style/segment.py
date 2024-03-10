@@ -539,11 +539,8 @@ class SegmentModel(nn.Module):
         small_holes = unique_labels[unique_counts < min_pixels]
         guide_labels = unique_labels[unique_counts >= min_pixels]
 
-        print("-----------------------------------------")
         for hole in small_holes:
             new_hole = self.find_closest_label(hole, guide_labels)
-            print(f"Segment self {hole} ==> {new_hole} ...");
             new_c_mask[segment == hole] = new_hole
 
-        print("-----------------------------------------")
         return new_c_mask

@@ -38,30 +38,14 @@ class CWCT(nn.Module):
 
                 content_index = self.get_label_index(c_mask, label)
                 style_index = self.get_label_index(s_mask, label)
-
-                # if content_index.size(0) < 1 or style_index.size(0) < 1:
-                #     print(f"missing {label} .....................")
-                #     continue
-
-                print(f"label = {label} -----------------------------------------------")
-                todos.debug.output_var("c_feat", single_content_feat)
-                todos.debug.output_var("s_feat", single_style_feat)
-
                 # single_content_feat.size() -- [32, 589824]
                 # content_index.size() -- [122365]
+
                 selected_c_feat = torch.index_select(single_content_feat, 1, content_index)
                 # selected_c_feat.size() -- [32, 122365]
                 selected_s_feat = torch.index_select(single_style_feat, 1, style_index)
-                todos.debug.output_var("selected_c_feat", selected_c_feat)
-                todos.debug.output_var("selected_s_feat", selected_s_feat)
 
-                whiten_feat = self.content_feat_whitening(selected_c_feat)
-                color_feature = self.content_feat_coloring(whiten_feat, selected_s_feat)
-                todos.debug.output_var("whiten_feat", whiten_feat)
-                todos.debug.output_var("color_feature", color_feature)
-
-                print(f"-----------------------------------------------")
-
+                color_feature = self.content_feat_coloring(selected_c_feat, selected_s_feat)
                 # color_feature.size() -- [32, 122365]
 
                 new_target_feature = target_feature.t() # size() -- [811200, 32]
@@ -97,47 +81,26 @@ class CWCT(nn.Module):
 
         return L
 
-    def content_feat_whitening(self, x):
-        # x -- content features
-        # x.size() -- [32, 167352]
-        mean = torch.mean(x, -1).unsqueeze(-1).expand_as(x)
-        x = x - mean
+    def content_feat_coloring(self, c_feat, s_feat):
+        c_mean = torch.mean(c_feat, dim=1)
+        c_res_feat = c_feat - c_mean.unsqueeze(-1).expand_as(c_feat)
         # x.size() -- [32, 167352]
 
-        conv = (x @ x.t()).div(x.shape[1] - 1)
-        inv_L = self.cholesky_dec(conv, invert=True) # size() -- [32, 32]
-        # inv_L.size() -- [32, 32]
-        whiten_x = inv_L @ x
+        conv_c = (c_res_feat @ c_res_feat.t()).div(c_res_feat.shape[1] - 1)
+        Lc = self.cholesky_dec(conv_c, invert=True) # size() -- [32, 32]
+        # Lc.size() -- [32, 32]
 
-        todos.debug.output_var("conv", conv)
-        todos.debug.output_var("inv_L", inv_L)
-        todos.debug.output_var("whiten_x", whiten_x)
+        s_mean = torch.mean(s_feat, dim=1)
+        s_res_feat = s_feat - s_mean.unsqueeze(1).expand_as(s_feat)
 
-
-        # U, S, V = torch.svd(conv)
-        # S = (S + self.eps).sqrt()
-        # # S = 1.0/S
-        # ZCA = U * torch.diag(S) * U.t() # size() -- [32, 32]
-        # whiten_y = ZCA @ x
-        # print("Max ABS: ", (whiten_x - whiten_y).abs().max()) # -- 20.505251
-
-        return whiten_x #size() -- [32, 167352]
-
-
-    def content_feat_coloring(self, c_whiten_feat, s_feat):
-        s_mean = torch.mean(s_feat, -1)
-        s_feat = s_feat - s_mean.unsqueeze(-1).expand_as(s_feat)
-
-        conv = (s_feat @ s_feat.t()).div(s_feat.shape[-1] - 1)
+        conv_s = (s_res_feat @ s_res_feat.t()).div(s_res_feat.shape[1] - 1)
         # conv.size() -- [32, 32]
-        Ls = self.cholesky_dec(conv, invert=False)
+        Ls = self.cholesky_dec(conv_s, invert=False)
 
-        c_color_feat = Ls @ c_whiten_feat # c_whiten_feat.size() -- [32, 167352]
-        c_color_feat = c_color_feat + s_mean.unsqueeze(-1).expand_as(c_color_feat)
+        c_color_feat = Ls @ Lc @ c_res_feat # c_whiten_feat.size() -- [32, 167352]
+        s_mean = s_mean.unsqueeze(-1).expand_as(c_color_feat)
+        c_color_feat = c_color_feat + s_mean
 
-        todos.debug.output_var("conv", conv)
-        todos.debug.output_var("Ls", Ls)
-        todos.debug.output_var("c_color_feat", c_color_feat)
 
         return c_color_feat # c_color_feat.size() -- [32, 167352]
 

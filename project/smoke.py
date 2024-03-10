@@ -104,7 +104,7 @@ def export_vst_encoder_onnx_model():
         'input' : {2: 'height', 3: 'width'}, 
         'output' : {2: 'height', 3: 'width'} 
     } 
-    onnx_filename = "output/vstnet_encoder.onnx"
+    onnx_filename = "output/image_photo_encoder.onnx"
 
     print(f"Export {onnx_filename} ..........................................")
     torch.onnx.export(model, (dummy_input), onnx_filename, 
@@ -174,7 +174,7 @@ def export_vst_decoder_onnx_model():
         'input' : {2: 'height', 3: 'width'}, 
         'output' : {2: 'height', 3: 'width'} 
     } 
-    onnx_filename = "output/vstnet_decoder.onnx"
+    onnx_filename = "output/image_photo_decoder.onnx"
 
     print(f"Export {onnx_filename} ..........................................")
     torch.onnx.export(model, (dummy_input), onnx_filename, 
@@ -280,26 +280,62 @@ def export_segment_onnx_model():
     print("!!!!!! Torch and ONNX Runtime output matched !!!!!!")
 
 
-def compile_model():
-    print("Compile model ...")
-    model, device = image_autops.get_autops_model()
-    B, C, H, W = 1, 3, model.MAX_H, model.MAX_W
-    dummy_input = torch.randn(B, C, H, W).to(device)
-    # with torch.no_grad():
-    #     dummy_output = model(dummy_input)
-    # torch_outputs = [dummy_output.cpu()]
+def debug_onnx_model():
+    import onnx
+    import onnxruntime
+    from onnxsim import simplify
+    import onnxoptimizer
+    from torch.nn import functional as F
 
-    example_inputs=(dummy_input,)
-    batch_dim = torch.export.Dim("batch", min=1, max=32)
-    so_path = torch._export.aot_compile(
-        model,
-        example_inputs,
-        # Specify the first dimension of the input x as dynamic
-        # dynamic_shapes={"x": {0: batch_dim}},
-        # Specify the generated shared library path
-        options={"aot_inductor.output_path": os.path.join(os.getcwd(), "output/image_autops.so")},
-    )
+    input_names = [ "input" ]
 
+    encoder_onnx_filename = "output/vstnet_encoder.onnx"
+    decoder_onnx_filename = "output/vstnet_decoder.onnx"
+
+    device = todos.model.get_device()
+
+    # dummy_input = todos.data.load_tensor("images/demo/content/05.jpg")
+    dummy_input = todos.data.load_tensor("/tmp/05.png") # 1024x576
+
+    # encode
+    if 'cuda' in device.type:
+        encoder_ort_session = onnxruntime.InferenceSession(encoder_onnx_filename, providers=['CUDAExecutionProvider'])
+    else:        
+        encoder_ort_session = onnxruntime.InferenceSession(encoder_onnx_filename, providers=['CPUExecutionProvider'])
+
+    def to_numpy(tensor):
+        return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
+    encoder_onnx_inputs = {input_names[0]: to_numpy(dummy_input) }
+    encoder_onnx_outputs = encoder_ort_session.run(None, encoder_onnx_inputs)
+
+    # decode
+    if 'cuda' in device.type:
+        decoder_ort_session = onnxruntime.InferenceSession(decoder_onnx_filename, providers=['CUDAExecutionProvider'])
+    else:        
+        decoder_ort_session = onnxruntime.InferenceSession(decoder_onnx_filename, providers=['CPUExecutionProvider'])
+
+    decoder_onnx_inputs = {input_names[0]: encoder_onnx_outputs[0] }
+    decoder_onnx_outputs = decoder_ort_session.run(None, decoder_onnx_inputs)
+
+    decoder_output_tensor = torch.from_numpy(decoder_onnx_outputs[0])
+    todos.debug.output_var("encoder_output_tensor", encoder_onnx_outputs[0])
+    todos.debug.output_var("decoder_output_tensor", decoder_output_tensor)
+
+    # todos.debug.output_tensor(decoder_output_tensor)
+    todos.data.save_tensor([decoder_output_tensor], "/tmp/test.png")
+    # ==========================================
+    # Info: c_image Tensor: 1x3x576x1024
+    # min: 0.0000, max: 1.0000, mean: 0.3286
+
+    # Info: c_image encode:  Tensor: 1x32x576x1024
+    # min: -0.9765, max: 1.0000, mean: -0.0013
+    # Info: output_tensor Tensor: 1x3x576x1024
+    # min: -0.2949, max: 1.0000, mean: 0.3884
+
+    # array [encoder_output_tensor] shape: (1, 32, 576, 1024), 
+    # min: -0.9764760136604309, max: 1.0, mean: -0.001306000049225986
+    # tensor [decoder_output_tensor] size: [1, 3, 576, 1024], 
+    # min: -0.294885, max: 1.0, mean: 0.388356
 
 
 if __name__ == "__main__":
@@ -307,7 +343,7 @@ if __name__ == "__main__":
     parser.add_argument('-s', '--shape_test', action="store_true", help="test shape")
     parser.add_argument('-b', '--bench_mark', action="store_true", help="test benchmark")
     parser.add_argument('-e', '--export_onnx', action="store_true", help="export onnx model")
-    parser.add_argument('-c', '--compile', action="store_true", help="Compile model to autops.so")
+    parser.add_argument('-d', '--debug', action="store_true", help="Debug onnx model")
     args = parser.parse_args()
 
     if args.shape_test:
@@ -317,10 +353,10 @@ if __name__ == "__main__":
     if args.export_onnx:
         export_vst_encoder_onnx_model()
         export_vst_decoder_onnx_model()
-        export_segment_onnx_model() # OK for trace mode
+        # export_segment_onnx_model() # OK for trace mode
 
-    if args.compile:
-        compile_model()
+    if args.debug:
+        debug_onnx_model()
     
-    if not (args.shape_test or args.bench_mark or args.export_onnx or args.compile):
+    if not (args.shape_test or args.bench_mark or args.export_onnx or args.debug):
         parser.print_help()

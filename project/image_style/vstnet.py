@@ -210,15 +210,8 @@ class VSTNetModel(nn.Module):
         c_image = self.resize_pad_tensor(c_image) # size() -- [1, 3, 576, 1024]
 
         # Encode features
-        print("==========================================")
-        todos.debug.output_var("s_image", s_image)
         s_feat = self.encoder.forward(s_image)   # self.encode(s_image)
-        todos.debug.output_var("s_image encode", s_feat)
-
-        todos.debug.output_var("c_image", c_image)
         c_feat = self.encoder.forward(c_image) # size() -- [1, 32, 576, 1024]
-        todos.debug.output_var("c_image encode", c_feat)
-        print("==========================================")
 
         # Segment and simple
         c_mask = self.segment_model(c_image).to(torch.int64) # size() -- [1, 1, 576, 1024]
@@ -227,13 +220,12 @@ class VSTNetModel(nn.Module):
         s_mask = self.segment_model.remove_small_holes(s_mask) # remove small holes
 
         z_cs = self.cwct_model(c_feat, s_feat, c_mask, s_mask) # size() -- [1, 32, 576, 1024]
-        todos.debug.output_var("z_cs", z_cs)
 
-        output = self.decoder.forward(z_cs)    # size() -- [1, 3, 576, 1024]
+        output = self.decoder.forward(z_cs) # size() -- [1, 3, 576, 1024]
         output = F.interpolate(output, size=(H, W), mode="bilinear", align_corners=False)
-        todos.debug.output_var("output", output)
 
         output_lab = rgb2lab(output)
+
         # blend_ab = 0.1*content_lab[:, 1:3, :, :] + 0.9*output_lab[:, 1:3, :, :]
         blend_ab = output_lab[:, 1:3, :, :]
 
@@ -299,7 +291,7 @@ class VSTEncoder(VSTAE):
 
         x1, x2 = vstnet_split(x)
         for block in self.stack:
-            x1, x2 = block.forward(x1, x2)
+            x1, x2 = block(x1, x2)
         x = vstnet_merge(x1, x2)
 
         x = self.channel_reduction.forward(x)
@@ -313,6 +305,9 @@ class VSTDecoder(VSTAE):
     def __init__(self, hidden_dim=16, sp_steps=2, model_path="models/image_photo_style.pth"):
         super().__init__(hidden_dim=hidden_dim, sp_steps=sp_steps, model_path=model_path)
 
+        self.reverse_stack = nn.ModuleList()
+        for n, m in self.stack.named_children():
+            self.reverse_stack.insert(0, m)
 
     def forward(self, x):
         # tensor [x] size: [1, 32, 676, 1200], min: -1.211427, max: 1.173751, mean: 0.000158
@@ -320,19 +315,22 @@ class VSTDecoder(VSTAE):
         x = self.channel_reduction.inverse(x)
 
         x1, x2 = vstnet_split(x)
-        # ugly code for torch.jit.script not support inverse !!!
-        n = len(self.stack) # 30
-        for i in range(n):
-            #x = self.stack[-1-i].inverse(x)
-            for j, block in enumerate(self.stack):
-                if j == n - i - 1:
-                    x1, x2 = block.inverse(x1, x2)
+        # # ugly code for torch.jit.script not support inverse !!!
+        # n = len(self.stack) # 30
+        # for i in range(n):
+        #     #x = self.stack[-1-i].inverse(x)
+        #     for j, block in enumerate(self.stack):
+        #         if j == n - i - 1:
+        #             x1, x2 = block.inverse(x1, x2)
+        for block in self.reverse_stack:
+            x1, x2 = block.inverse(x1, x2)
+
         x = vstnet_merge(x1, x2)
 
         x = self.inj_pad.inverse(x)
 
         # tensor [x] size: [1, 3, 676, 1200], min: -0.478305, max: 1.713724, mean: 0.482254
-        return x
+        return x.clamp(0.0, 1.0)
 
 
 def create_photo_style_model():
