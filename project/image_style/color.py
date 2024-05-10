@@ -82,7 +82,7 @@ def lab2xyz(lab):
     out = torch.cat((x_int[:, None, :, :], y_int[:, None, :, :], z_int[:, None, :, :]), dim=1)
     mask = (out > 0.2068966).float().to(lab.device)
 
-    out = (out ** 3.0) * mask + (out - 16.0 / 116.0) / 7.787 * (1.0 - mask)
+    out = (out**3.0) * mask + (out - 16.0 / 116.0) / 7.787 * (1.0 - mask)
 
     sc = torch.tensor((0.95047, 1.0, 1.08883))[None, :, None, None]
     sc = sc.to(out.device)

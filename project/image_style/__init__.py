@@ -36,6 +36,7 @@ def get_vstnet_encoder_model():
 
     return model, device
 
+
 def get_vstnet_decoder_model():
     """Create model."""
     from .vstnet import VSTDecoder
@@ -83,7 +84,7 @@ def get_photo_style_model():
     # https://github.com/pytorch/pytorch/issues/52286
     torch._C._jit_set_profiling_executor(False)
     # C++ Reference
-    # torch::jit::getProfilingMode() = false;                                                                                                             
+    # torch::jit::getProfilingMode() = false;
     # torch::jit::setTensorExprFuserEnabled(false);
 
     todos.data.mkdir("output")

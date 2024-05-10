@@ -3,10 +3,12 @@ import torch.nn as nn
 import todos
 import pdb
 
+
 class CWCT(nn.Module):
-    '''
-    Cholesky decomposition based WCT    
-    '''
+    """
+    Cholesky decomposition based WCT
+    """
+
     def __init__(self, eps=2e-5):
         super().__init__()
         self.eps = eps
@@ -18,8 +20,8 @@ class CWCT(nn.Module):
         # s_mask.size() -- [1, 1, 720, 1280]
 
         B, C, H, W = c_feat.size()
-        c_feat = c_feat.reshape(B, C, -1) # size() -- [1, 32, 811200]
-        s_feat = s_feat.reshape(B, C, -1) # size() -- [1, 32, 921600]
+        c_feat = c_feat.reshape(B, C, -1)  # size() -- [1, 32, 811200]
+        s_feat = s_feat.reshape(B, C, -1)  # size() -- [1, 32, 921600]
 
         c_mask = c_mask.unsqueeze(0).unsqueeze(0)
         s_mask = s_mask.unsqueeze(0).unsqueeze(0)
@@ -28,9 +30,9 @@ class CWCT(nn.Module):
         # guide_labels -- [0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] -- size() -- 22
 
         for i in range(B):
-            single_content_feat = c_feat[i]     # [C, H*W]
-            single_style_feat = s_feat[i]   # [C, sH*sW]
-            target_feature = single_content_feat.clone()   # [C, H*W]
+            single_content_feat = c_feat[i]  # [C, H*W]
+            single_style_feat = s_feat[i]  # [C, sH*sW]
+            target_feature = single_content_feat.clone()  # [C, H*W]
 
             for label in label_set:
                 if not guide_labels[int(label)]:
@@ -48,7 +50,7 @@ class CWCT(nn.Module):
                 color_feature = self.content_feat_coloring(selected_c_feat, selected_s_feat)
                 # color_feature.size() -- [32, 122365]
 
-                new_target_feature = target_feature.t() # size() -- [811200, 32]
+                new_target_feature = target_feature.t()  # size() -- [811200, 32]
                 new_target_feature.index_copy_(0, content_index, color_feature.t())
 
                 target_feature = new_target_feature.t()
@@ -57,7 +59,7 @@ class CWCT(nn.Module):
 
         return c_feat.reshape(B, C, H, W)
 
-    def cholesky_dec(self, conv, invert: bool=False):
+    def cholesky_dec(self, conv, invert: bool = False):
         # conv.size() -- [32, 32]
         # torch.linalg.cholesky(A, *, upper=False, out=None)
         # try:
@@ -73,11 +75,11 @@ class CWCT(nn.Module):
         #             break
         #         except RuntimeError:
         #             eps = eps+self.eps
-        L = torch.linalg.cholesky(conv) # !!! onnx not support !!!
+        L = torch.linalg.cholesky(conv)  # !!! onnx not support !!!
 
         # (L * L.t() - conv).abs().max() -- tensor(0.002681, device='cuda:0')
         if invert:
-            L = torch.inverse(L) # onnx not support
+            L = torch.inverse(L)  # onnx not support
 
         return L
 
@@ -87,7 +89,7 @@ class CWCT(nn.Module):
         # x.size() -- [32, 167352]
 
         conv_c = (c_res_feat @ c_res_feat.t()).div(c_res_feat.shape[1] - 1)
-        Lc = self.cholesky_dec(conv_c, invert=True) # size() -- [32, 32]
+        Lc = self.cholesky_dec(conv_c, invert=True)  # size() -- [32, 32]
         # Lc.size() -- [32, 32]
 
         s_mean = torch.mean(s_feat, dim=1)
@@ -97,12 +99,11 @@ class CWCT(nn.Module):
         # conv.size() -- [32, 32]
         Ls = self.cholesky_dec(conv_s, invert=False)
 
-        c_color_feat = Ls @ Lc @ c_res_feat # c_whiten_feat.size() -- [32, 167352]
+        c_color_feat = Ls @ Lc @ c_res_feat  # c_whiten_feat.size() -- [32, 167352]
         s_mean = s_mean.unsqueeze(-1).expand_as(c_color_feat)
         c_color_feat = c_color_feat + s_mean
 
-
-        return c_color_feat # c_color_feat.size() -- [32, 167352]
+        return c_color_feat  # c_color_feat.size() -- [32, 167352]
 
     def compute_label_info(self, c_mask, s_mask):
         label_set = torch.unique(c_mask)
@@ -116,13 +117,13 @@ class CWCT(nn.Module):
             b = self.get_label_index(s_mask, l).size(0)
             if a > 10 and b > 10 and a < (10 * b) and b < (10 * a):
                 guide_labels[l] = 1
-            else:
-                print(f"missing {l} .....................")
+            # else:
+            #     print(f"missing {l} .....................")
 
-        # guide_labels -- 
+        # guide_labels --
         # Tensor([0., 0., 1., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.])
         return label_set, guide_labels
 
     def get_label_index(self, segment, label):
         mask = torch.where(segment.flatten() == label)
-        return mask[0] # size() -- [122365]
+        return mask[0]  # size() -- [122365]

@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from torch.nn import functional as F
+import todos
 import pdb
 
 def split(x):
@@ -207,6 +208,7 @@ class RevResNet(nn.Module):
             return self._inverse(x)
 
     def _forward(self, x):
+        todos.debug.output_var("_forward 1 x:", x)
         x = self.inj_pad.forward(x)
 
         x = split(x)
@@ -217,9 +219,12 @@ class RevResNet(nn.Module):
 
         x = self.channel_reduction.forward(x)
 
+        todos.debug.output_var("_forward 2 x:", x)
         return x
 
     def _inverse(self, x):
+        todos.debug.output_var("_inverse 1 x:", x)
+
         x = self.channel_reduction.inverse(x)
 
         x = split(x)
@@ -228,6 +233,8 @@ class RevResNet(nn.Module):
         x = merge(x[0], x[1])
 
         x = self.inj_pad.inverse(x)
+
+        todos.debug.output_var("_inverse 2 x:", x)
 
         return x
 

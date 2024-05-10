@@ -16,6 +16,7 @@ import argparse
 import todos
 import pdb
 
+
 def test_input_shape():
     import time
     import random
@@ -24,9 +25,9 @@ def test_input_shape():
     print("Test input shape ...")
 
     model, device = image_style.get_photo_style_model()
+    B, C, H, W = 1, 3, model.MAX_H, model.MAX_W
 
     N = 100
-    B, C, H, W = 1, 3, model.MAX_H, model.MAX_W
 
     mean_time = 0
     progress_bar = tqdm(total=N)
@@ -43,7 +44,8 @@ def test_input_shape():
         start_time = time.time()
         with torch.no_grad():
             y = model(x.to(device), s.to(device))
-        if 'cpu' not in str(device):
+
+        if "cpu" not in str(device):
             torch.cuda.synchronize()
         mean_time += time.time() - start_time
 
@@ -68,7 +70,7 @@ def run_bench_mark():
 
             with torch.no_grad():
                 y = model(image.to(device), input2.to(device))
-            if 'cpu' not in str(device):
+            if "cpu" not in str(device):
                 torch.cuda.synchronize()
         p.step()
 
@@ -87,7 +89,7 @@ def export_vst_encoder_onnx_model():
     print("Export onnx model ...")
 
     # 1. Run torch model
-    model, device = image_style.get_vstnet_encoder_model() 
+    model, device = image_style.get_vstnet_encoder_model()
 
     B, C, H, W = 1, 3, 512, 512
     dummy_input = torch.randn(B, C, H, W).to(device)
@@ -97,19 +99,19 @@ def export_vst_encoder_onnx_model():
     torch_outputs = [dummy_output.cpu()]
 
     # 2. Export onnx model
-    input_names = [ "input" ]
+    input_names = ["input"]
 
-    output_names = [ "output" ]
-    dynamic_axes = { 
-        'input' : {2: 'height', 3: 'width'}, 
-        'output' : {2: 'height', 3: 'width'} 
-    } 
+    output_names = ["output"]
+    dynamic_axes = {"input": {2: "height", 3: "width"}, "output": {2: "height", 3: "width"}}
     onnx_filename = "output/image_photo_encoder.onnx"
 
     print(f"Export {onnx_filename} ..........................................")
-    torch.onnx.export(model, (dummy_input), onnx_filename, 
-        verbose=False, 
-        input_names=input_names, 
+    torch.onnx.export(
+        model,
+        (dummy_input),
+        onnx_filename,
+        verbose=False,
+        input_names=input_names,
         output_names=output_names,
         dynamic_axes=dynamic_axes,
     )
@@ -120,15 +122,15 @@ def export_vst_encoder_onnx_model():
 
     onnx_model, check = simplify(onnx_model)
     assert check, "Simplified ONNX model could not be validated"
-    onnx_model = onnxoptimizer.optimize(onnx_model)    
+    onnx_model = onnxoptimizer.optimize(onnx_model)
     onnx.save(onnx_model, onnx_filename)
     # print(onnx.helper.printable_graph(onnx_model.graph))
 
     # 4. Run onnx model
-    if 'cuda' in device.type:
-        ort_session = onnxruntime.InferenceSession(onnx_filename, providers=['CUDAExecutionProvider'])
-    else:        
-        ort_session = onnxruntime.InferenceSession(onnx_filename, providers=['CPUExecutionProvider'])
+    if "cuda" in device.type:
+        ort_session = onnxruntime.InferenceSession(onnx_filename, providers=["CUDAExecutionProvider"])
+    else:
+        ort_session = onnxruntime.InferenceSession(onnx_filename, providers=["CPUExecutionProvider"])
 
     def to_numpy(tensor):
         return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
@@ -145,6 +147,7 @@ def export_vst_encoder_onnx_model():
     todos.model.reset_device()
 
     print("!!!!!! Torch and ONNX Runtime output matched !!!!!!")
+
 
 def export_vst_decoder_onnx_model():
     # https://github.com/onnx/onnx/blob/main/docs/Operators.md
@@ -157,7 +160,7 @@ def export_vst_decoder_onnx_model():
     print("Export onnx model ...")
 
     # 1. Run torch model
-    model, device = image_style.get_vstnet_decoder_model() 
+    model, device = image_style.get_vstnet_decoder_model()
 
     B, C, H, W = 1, 32, 512, 512
     dummy_input = torch.randn(B, C, H, W).to(device)
@@ -167,19 +170,19 @@ def export_vst_decoder_onnx_model():
     torch_outputs = [dummy_output.cpu()]
 
     # 2. Export onnx model
-    input_names = [ "input" ]
+    input_names = ["input"]
 
-    output_names = [ "output" ]
-    dynamic_axes = { 
-        'input' : {2: 'height', 3: 'width'}, 
-        'output' : {2: 'height', 3: 'width'} 
-    } 
+    output_names = ["output"]
+    dynamic_axes = {"input": {2: "height", 3: "width"}, "output": {2: "height", 3: "width"}}
     onnx_filename = "output/image_photo_decoder.onnx"
 
     print(f"Export {onnx_filename} ..........................................")
-    torch.onnx.export(model, (dummy_input), onnx_filename, 
-        verbose=False, 
-        input_names=input_names, 
+    torch.onnx.export(
+        model,
+        (dummy_input),
+        onnx_filename,
+        verbose=False,
+        input_names=input_names,
         output_names=output_names,
         dynamic_axes=dynamic_axes,
     )
@@ -190,15 +193,15 @@ def export_vst_decoder_onnx_model():
 
     onnx_model, check = simplify(onnx_model)
     assert check, "Simplified ONNX model could not be validated"
-    onnx_model = onnxoptimizer.optimize(onnx_model)    
+    onnx_model = onnxoptimizer.optimize(onnx_model)
     onnx.save(onnx_model, onnx_filename)
     # print(onnx.helper.printable_graph(onnx_model.graph))
 
     # 4. Run onnx model
-    if 'cuda' in device.type:
-        ort_session = onnxruntime.InferenceSession(onnx_filename, providers=['CUDAExecutionProvider'])
-    else:        
-        ort_session = onnxruntime.InferenceSession(onnx_filename, providers=['CPUExecutionProvider'])
+    if "cuda" in device.type:
+        ort_session = onnxruntime.InferenceSession(onnx_filename, providers=["CUDAExecutionProvider"])
+    else:
+        ort_session = onnxruntime.InferenceSession(onnx_filename, providers=["CPUExecutionProvider"])
 
     def to_numpy(tensor):
         return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
@@ -215,6 +218,7 @@ def export_vst_decoder_onnx_model():
 
     print("!!!!!! Torch and ONNX Runtime output matched !!!!!!")
 
+
 def export_segment_onnx_model():
     import onnx
     import onnxruntime
@@ -226,24 +230,24 @@ def export_segment_onnx_model():
     # 1. Run torch model
     model, device = image_style.get_segment_model()
 
-    B, C, H, W = 1, 3, 256, 256 # model.MAX_H, model.MAX_W
+    B, C, H, W = 1, 3, 256, 256  # model.MAX_H, model.MAX_W
     dummy_input = torch.randn(B, C, H, W).to(device)
     with torch.no_grad():
         dummy_output = model(dummy_input)
     torch_outputs = [dummy_output.cpu()]
 
     # 2. Export onnx model
-    input_names = [ "input" ]
-    output_names = [ "output" ]
-    dynamic_axes = { 
-        'input' : {2: 'height', 3: 'width'}, 
-        'output' : {2: 'height', 3: 'width'} 
-    }    
+    input_names = ["input"]
+    output_names = ["output"]
+    dynamic_axes = {"input": {2: "height", 3: "width"}, "output": {2: "height", 3: "width"}}
     onnx_filename = "output/image_segment.onnx"
 
-    torch.onnx.export(model, dummy_input, onnx_filename, 
-        verbose=False, 
-        input_names=input_names, 
+    torch.onnx.export(
+        model,
+        dummy_input,
+        onnx_filename,
+        verbose=False,
+        input_names=input_names,
         output_names=output_names,
         dynamic_axes=dynamic_axes,
     )
@@ -254,20 +258,20 @@ def export_segment_onnx_model():
 
     onnx_model, check = simplify(onnx_model)
     assert check, "Simplified ONNX model could not be validated"
-    onnx_model = onnxoptimizer.optimize(onnx_model)    
+    onnx_model = onnxoptimizer.optimize(onnx_model)
     onnx.save(onnx_model, onnx_filename)
     # print(onnx.helper.printable_graph(onnx_model.graph))
 
     # 4. Run onnx model
-    if 'cuda' in device.type:
-        ort_session = onnxruntime.InferenceSession(onnx_filename, providers=['CUDAExecutionProvider'])
-    else:        
-        ort_session = onnxruntime.InferenceSession(onnx_filename, providers=['CPUExecutionProvider'])
+    if "cuda" in device.type:
+        ort_session = onnxruntime.InferenceSession(onnx_filename, providers=["CUDAExecutionProvider"])
+    else:
+        ort_session = onnxruntime.InferenceSession(onnx_filename, providers=["CPUExecutionProvider"])
 
     def to_numpy(tensor):
         return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
 
-    onnx_inputs = {input_names[0]: to_numpy(dummy_input) }
+    onnx_inputs = {input_names[0]: to_numpy(dummy_input)}
     onnx_outputs = ort_session.run(None, onnx_inputs)
 
     # 5.Compare output results
@@ -287,7 +291,7 @@ def debug_onnx_model():
     import onnxoptimizer
     from torch.nn import functional as F
 
-    input_names = [ "input" ]
+    input_names = ["input"]
 
     encoder_onnx_filename = "output/image_photo_encoder.onnx"
     decoder_onnx_filename = "output/image_photo_decoder.onnx"
@@ -295,26 +299,27 @@ def debug_onnx_model():
     device = todos.model.get_device()
 
     # dummy_input = todos.data.load_tensor("images/demo/content/05.jpg")
-    dummy_input = todos.data.load_tensor("/tmp/05.png") # 1024x576
+    dummy_input = todos.data.load_tensor("/tmp/05.png")  # 1024x576
 
     # encode
-    if 'cuda' in device.type:
-        encoder_ort_session = onnxruntime.InferenceSession(encoder_onnx_filename, providers=['CUDAExecutionProvider'])
-    else:        
-        encoder_ort_session = onnxruntime.InferenceSession(encoder_onnx_filename, providers=['CPUExecutionProvider'])
+    if "cuda" in device.type:
+        encoder_ort_session = onnxruntime.InferenceSession(encoder_onnx_filename, providers=["CUDAExecutionProvider"])
+    else:
+        encoder_ort_session = onnxruntime.InferenceSession(encoder_onnx_filename, providers=["CPUExecutionProvider"])
 
     def to_numpy(tensor):
         return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
-    encoder_onnx_inputs = {input_names[0]: to_numpy(dummy_input) }
+
+    encoder_onnx_inputs = {input_names[0]: to_numpy(dummy_input)}
     encoder_onnx_outputs = encoder_ort_session.run(None, encoder_onnx_inputs)
 
     # decode
-    if 'cuda' in device.type:
-        decoder_ort_session = onnxruntime.InferenceSession(decoder_onnx_filename, providers=['CUDAExecutionProvider'])
-    else:        
-        decoder_ort_session = onnxruntime.InferenceSession(decoder_onnx_filename, providers=['CPUExecutionProvider'])
+    if "cuda" in device.type:
+        decoder_ort_session = onnxruntime.InferenceSession(decoder_onnx_filename, providers=["CUDAExecutionProvider"])
+    else:
+        decoder_ort_session = onnxruntime.InferenceSession(decoder_onnx_filename, providers=["CPUExecutionProvider"])
 
-    decoder_onnx_inputs = {input_names[0]: encoder_onnx_outputs[0] }
+    decoder_onnx_inputs = {input_names[0]: encoder_onnx_outputs[0]}
     decoder_onnx_outputs = decoder_ort_session.run(None, decoder_onnx_inputs)
 
     decoder_output_tensor = torch.from_numpy(decoder_onnx_outputs[0])
@@ -325,11 +330,11 @@ def debug_onnx_model():
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Smoke Test')
-    parser.add_argument('-s', '--shape_test', action="store_true", help="test shape")
-    parser.add_argument('-b', '--bench_mark', action="store_true", help="test benchmark")
-    parser.add_argument('-e', '--export_onnx', action="store_true", help="export onnx model")
-    parser.add_argument('-d', '--debug', action="store_true", help="Debug onnx model")
+    parser = argparse.ArgumentParser(description="Smoke Test")
+    parser.add_argument("-s", "--shape_test", action="store_true", help="test shape")
+    parser.add_argument("-b", "--bench_mark", action="store_true", help="test benchmark")
+    parser.add_argument("-e", "--export_onnx", action="store_true", help="export onnx model")
+    parser.add_argument("-d", "--debug", action="store_true", help="Debug onnx model")
     args = parser.parse_args()
 
     if args.shape_test:
@@ -339,10 +344,10 @@ if __name__ == "__main__":
     if args.export_onnx:
         export_vst_encoder_onnx_model()
         export_vst_decoder_onnx_model()
-        export_segment_onnx_model() # OK for trace mode
+        export_segment_onnx_model()  # OK for trace mode
 
     if args.debug:
         debug_onnx_model()
-    
+
     if not (args.shape_test or args.bench_mark or args.export_onnx or args.debug):
         parser.print_help()

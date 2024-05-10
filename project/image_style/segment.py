@@ -22,6 +22,7 @@ import pdb  # For debug
 
 FEATURE_RESULT_TYPE = Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
 
+
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU):
         super().__init__()
@@ -47,13 +48,13 @@ class Attention(nn.Module):
 
         self.num_heads = num_heads
         head_dim = dim // num_heads
-        self.scale = head_dim ** -0.5
+        self.scale = head_dim**-0.5
 
         self.q = nn.Linear(dim, dim, bias=True)
         self.kv = nn.Linear(dim, dim * 2, bias=True)
         self.proj = nn.Linear(dim, dim)
 
-        self.sr_ratio = sr_ratio # maybe 8, 4, 2, 1
+        self.sr_ratio = sr_ratio  # maybe 8, 4, 2, 1
         if sr_ratio > 1:
             self.sr = nn.Conv2d(dim, dim, kernel_size=sr_ratio, stride=sr_ratio)
             self.norm = nn.LayerNorm(dim)
@@ -84,7 +85,10 @@ class Attention(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, dim, num_heads,
+    def __init__(
+        self,
+        dim,
+        num_heads,
         mlp_ratio=4.0,
         act_layer=nn.GELU,
         norm_layer=nn.LayerNorm,
@@ -99,7 +103,7 @@ class Block(nn.Module):
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer)
 
     def forward(self, x, H: int, W: int):
-        x = x + self.attn(self.norm1(x), H, W) 
+        x = x + self.attn(self.norm1(x), H, W)
         x = x + self.mlp(self.norm2(x), H, W)
         return x
 
@@ -111,8 +115,10 @@ class OverlapPatchEmbed(nn.Module):
         super().__init__()
         patch_size = (patch_size, patch_size)
 
-        self.patch_size = patch_size # eg: (7, 7), (3, 3)
-        self.proj = nn.Conv2d(in_chans, embed_dim,
+        self.patch_size = patch_size  # eg: (7, 7), (3, 3)
+        self.proj = nn.Conv2d(
+            in_chans,
+            embed_dim,
             kernel_size=patch_size,
             stride=stride,
             padding=(patch_size[0] // 2, patch_size[1] // 2),
@@ -129,7 +135,8 @@ class OverlapPatchEmbed(nn.Module):
 
 
 class VisionTransformer(nn.Module):
-    def __init__(self,
+    def __init__(
+        self,
         patch_size=16,
         in_chans=3,
         num_classes=1000,
@@ -259,6 +266,7 @@ class VisionTransformer(nn.Module):
 
         return (x1, x2, x3, x4)
 
+
 class DWConv(nn.Module):
     def __init__(self, dim=768):
         super().__init__()
@@ -319,8 +327,13 @@ class DWConv(nn.Module):
 class mit_b4(VisionTransformer):
     def __init__(self, **kwargs):
         super().__init__(
-            patch_size=4, embed_dims=[64, 128, 320, 512], num_heads=[1, 2, 5, 8], mlp_ratios=[4, 4, 4, 4],
-            norm_layer=partial(nn.LayerNorm, eps=1e-6), depths=[3, 8, 27, 3], sr_ratios=[8, 4, 2, 1],
+            patch_size=4,
+            embed_dims=[64, 128, 320, 512],
+            num_heads=[1, 2, 5, 8],
+            mlp_ratios=[4, 4, 4, 4],
+            norm_layer=partial(nn.LayerNorm, eps=1e-6),
+            depths=[3, 8, 27, 3],
+            sr_ratios=[8, 4, 2, 1],
         )
 
 
@@ -336,6 +349,7 @@ class MLP(nn.Module):
     """
     Linear Embedding
     """
+
     def __init__(self, input_dim=2048, embed_dim=768):
         super().__init__()
         self.proj = nn.Linear(input_dim, embed_dim)
@@ -348,7 +362,9 @@ class MLP(nn.Module):
 
 class ConvModule(nn.Module):
     """A conv block that bundles conv/norm/activation layers."""
-    def __init__(self,
+
+    def __init__(
+        self,
         in_channels,
         out_channels,
         kernel_size,
@@ -376,6 +392,7 @@ class SegFormerHead(nn.Module):
     """
     SegFormer: Simple and Efficient Design for Semantic Segmentation with Transformers
     """
+
     def __init__(self, embedding_dim=768):
         super().__init__()
         # for b1 -- embedding_dim == 256
@@ -444,7 +461,7 @@ class SegFormerHead(nn.Module):
         _c1 = self.linear_c1(c1).reshape(n, -1, c1.shape[2], c1.shape[3])
 
         _c = self.linear_fuse(torch.cat([_c4, _c3, _c2, _c1], dim=1))
-        x = _c # self.dropout(_c)
+        x = _c  # self.dropout(_c)
 
         x = self.linear_pred(x)
 
@@ -474,17 +491,15 @@ class SegmentModel(nn.Module):
         label_mapping = torch.from_numpy(np.load(mapping_name)).to(torch.int64)
         self.register_buffer("label_mapping", label_mapping)
 
-
         self.eval()
 
     def load_weights(self, model_path="models/image_segment.pth"):
         cdir = os.path.dirname(__file__)
         checkpoint = model_path if cdir == "" else cdir + "/" + model_path
         sd = torch.load(checkpoint)
-        if 'state_dict' in sd.keys():
-            sd = sd['state_dict']
+        if "state_dict" in sd.keys():
+            sd = sd["state_dict"]
         self.load_state_dict(sd)
-
 
     def forward(self, x):
         B, C, H, W = x.shape
@@ -504,7 +519,7 @@ class SegmentModel(nn.Module):
         #     ([1, 512, 30, 40]))
         # seg_logit.size() -- ([1, 150, 240, 320])
 
-        seg_logit = F.interpolate(seg_logit, size=(H,W), mode="bilinear", align_corners=False)
+        seg_logit = F.interpolate(seg_logit, size=(H, W), mode="bilinear", align_corners=False)
         seg_logit = F.softmax(seg_logit, dim=1)
 
         mask = seg_logit.argmax(dim=1).unsqueeze(0)
@@ -520,12 +535,11 @@ class SegmentModel(nn.Module):
         candidate_sets = self.label_mapping[:, int(label)]
 
         for close_label in candidate_sets:
-            index = torch.where(guide_labels==close_label)[0]
-            if index.size(0) > 0: # OK we find
+            index = torch.where(guide_labels == close_label)[0]
+            if index.size(0) > 0:  # OK we find
                 return close_label
 
-        return label # Sorry we don't find, use original
-        
+        return label  # Sorry we don't find, use original
 
     def remove_small_holes(self, segment):
         # segment.size() -- [1, 1, 576, 1024], segment.dtype -- torch.int64
