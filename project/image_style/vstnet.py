@@ -24,7 +24,7 @@ def vstnet_merge(x1, x2):
     return torch.cat((x1, x2), dim=1)
 
 
-def vstnet_pixel_shuffle(x, size: int = 2):
+def vstnet_pixel_unshuffle(x, size: int = 2):
     B, C, H, W = x.size()
     H = H // size
     W = W // size
@@ -32,7 +32,7 @@ def vstnet_pixel_shuffle(x, size: int = 2):
     return x.reshape(B, C * size * size, H, W)
 
 
-def vstnet_pixel_unshuffle(x, size: int = 2):
+def vstnet_pixel_shuffle(x, size: int = 2):
     B, C, H, W = x.size()
     C = C // (size * size)
     x = x.reshape(B, size, size, C, H, W).permute(0, 3, 4, 1, 5, 2)
@@ -100,23 +100,21 @@ class ResidualBlock2(nn.Module):
 
     def forward(self, x1, x2) -> Tuple[torch.Tensor, torch.Tensor]:
         fx = self.conv(x2)
-        x1 = vstnet_pixel_shuffle(x1)  # [1, 16, 676, 1200] ==> [1, 64, 338, 600]
-        x2 = vstnet_pixel_shuffle(x2)  # [1, 16, 676, 1200] ==> [1, 64, 338, 600]
+        x1 = vstnet_pixel_unshuffle(x1)  # [1, 16, 676, 1200] ==> [1, 64, 338, 600]
+        x2 = vstnet_pixel_unshuffle(x2)  # [1, 16, 676, 1200] ==> [1, 64, 338, 600]
         return (x2, fx + x1)
 
     def inverse(self, y1, y2) -> Tuple[torch.Tensor, torch.Tensor]:
-        y1 = vstnet_pixel_unshuffle(y1)
+        y1 = vstnet_pixel_shuffle(y1)
         fx = self.conv(y1)
         x1 = y2 - fx
-        x1 = vstnet_pixel_unshuffle(x1)
+        x1 = vstnet_pixel_shuffle(x1)
         return (x1, y1)
 
 
 class ChannelReduction(nn.Module):
     def __init__(self, in_ch=256, out_ch=16, sp_steps=2, n_blocks=2):
         super().__init__()
-        pad = out_ch * (4**sp_steps) - in_ch  # ==> pad === 0
-        self.inj_pad = InjectivePad(pad)
         self.sp_steps = sp_steps
 
         self.block_list = nn.ModuleList()
@@ -127,12 +125,7 @@ class ChannelReduction(nn.Module):
         # tensor [x] size: [1, 512, 144, 256], min: -0.669773, max: 0.737936, mean: -0.000687
 
         x1, x2 = vstnet_split(x)
-        x1 = self.inj_pad.forward(x1)
-        x2 = self.inj_pad.forward(x2)
 
-        # support torch.jit.script
-        # for block in self.block_list:
-        #     x = block.forward(x)
         for i, block in enumerate(self.block_list):
             (x1, x2) = block(x1, x2)
 
@@ -140,27 +133,22 @@ class ChannelReduction(nn.Module):
 
         # spread
         for _ in range(self.sp_steps):
-            x = vstnet_pixel_unshuffle(x)
+            x = vstnet_pixel_shuffle(x)
 
         # tensor [x] size: [1, 32, 576, 1024], min: -0.919658, max: 1.018641, mean: -0.001065
         return x
 
     def inverse(self, x):
         for _ in range(self.sp_steps):
-            x = vstnet_pixel_shuffle(x, size=2)
+            x = vstnet_pixel_unshuffle(x, size=2)
 
         x1, x2 = vstnet_split(x)
-        # support torch.jit.script
-        # for block in self.block_list[::-1]:
-        #     x = block.inverse(x)
+
         n = len(self.block_list)  # 2
         for i in range(n):
             for j, block in enumerate(self.block_list):
                 if j == n - i - 1:
                     x1, x2 = block(x1, x2)
-        # x = list(x)
-        x1 = self.inj_pad.inverse(x1)
-        x2 = self.inj_pad.inverse(x2)
 
         x = vstnet_merge(x1, x2)
         return x
